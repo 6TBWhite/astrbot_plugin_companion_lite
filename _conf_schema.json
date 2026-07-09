@@ -1,0 +1,201 @@
+{
+  "Basic_Settings": {
+    "description": "基础设置",
+    "hint": "控制 CompanionLite 的基础开关。",
+    "type": "object",
+    "items": {
+      "enable_message_capture": {
+        "description": "启用消息捕获",
+        "hint": "捕获私聊消息用于关系状态学习",
+        "type": "bool",
+        "default": true
+      },
+      "enable_llm_hook": {
+        "description": "启用LLM上下文注入",
+        "hint": "在LLM请求前注入关系状态上下文",
+        "type": "bool",
+        "default": true
+      },
+      "enable_silence": {
+        "description": "启用沉默机制",
+        "hint": "bot在状态不佳时可以选择简短回复或保持沉默",
+        "type": "bool",
+        "default": true
+      },
+      "enable_deep_reflection": {
+        "description": "启用深度反思",
+        "hint": "每N条消息触发LLM辅助深度关系分析",
+        "type": "bool",
+        "default": true
+      },
+      "main_user_ids": {
+        "description": "主用户ID列表",
+        "hint": "逗号分隔的用户ID。留空时插件不学习、不注入。",
+        "type": "string",
+        "default": ""
+      },
+      "log_level": {
+        "description": "日志级别",
+        "hint": "预留配置项",
+        "type": "string",
+        "default": "info"
+      },
+      "min_message_length": {
+        "description": "最短学习消息长度",
+        "hint": "低于此长度的消息不参与学习",
+        "type": "int",
+        "default": 2
+      },
+      "max_message_length": {
+        "description": "最长学习消息长度",
+        "hint": "高于此长度的消息不参与学习",
+        "type": "int",
+        "default": 500
+      },
+      "max_buffer_messages": {
+        "description": "消息缓冲上限",
+        "hint": "每个用户最多保留多少条待反思消息，防止缓冲无限增长",
+        "type": "int",
+        "default": 120
+      },
+      "recent_rate_window_seconds": {
+        "description": "活跃聊天统计窗口(秒)",
+        "hint": "用于判断连续快速消息的时间窗口",
+        "type": "int",
+        "default": 60
+      },
+      "bond_familiarity_floor": {
+        "description": "陪伴模式熟悉度起步线",
+        "hint": "/bond 时把熟悉度抬到此值（若更低）。默认55=熟人起步，不锁死后续仍可降",
+        "type": "float",
+        "default": 55.0
+      },
+      "bond_closeness_floor": {
+        "description": "陪伴模式亲近度起步线",
+        "hint": "/bond 时把亲近度抬到此值（若更低）。默认50=一般亲近",
+        "type": "float",
+        "default": 50.0
+      },
+      "bond_boundary_ceiling": {
+        "description": "陪伴模式边界压力上限",
+        "hint": "/bond 时把边界压力压到此值（若更高）。默认15=放松",
+        "type": "float",
+        "default": 15.0
+      }
+    }
+  },
+  "Reflection_Settings": {
+    "description": "深度反思设置",
+    "hint": "LLM 深度关系分析的触发条件。",
+    "type": "object",
+    "items": {
+      "reflection_message_interval": {
+        "description": "反思触发消息间隔",
+        "hint": "每收到多少条消息触发一次LLM深度反思",
+        "type": "int",
+        "default": 12
+      },
+      "reflection_time_interval_minutes": {
+        "description": "反思触发时间间隔(分钟)",
+        "hint": "距离上次反思至少间隔多少分钟才再次触发",
+        "type": "int",
+        "default": 30
+      }
+    }
+  },
+  "Continuity_Settings": {
+    "description": "每日弧线与连续性",
+    "hint": "P3：每日情感弧线提炼与次日开场连续性注入。",
+    "type": "object",
+    "items": {
+      "enable_continuity_injection": {
+        "description": "启用连续性注入",
+        "hint": "把昨天的弧线与相处建议注入到今天的对话上下文（也是 A/B 验证开关）",
+        "type": "bool",
+        "default": true
+      },
+      "continuity_lookback_days": {
+        "description": "趋势回看天数",
+        "hint": "生成连续性提示时回看最近几天的弧线趋势（1-7）",
+        "type": "int",
+        "default": 3
+      },
+      "enable_arc_finalization": {
+        "description": "启用日终弧线收尾",
+        "hint": "跨天首次反思时把昨天累积的建议片段压缩成一条正式的明日指导",
+        "type": "bool",
+        "default": true
+      },
+      "arc_midday_compress_threshold": {
+        "description": "日中压缩片段阈值",
+        "hint": "一天内累积到几条建议片段就先做一次中间压缩（0=禁用日中压缩）",
+        "type": "int",
+        "default": 4
+      },
+      "arc_max_segments": {
+        "description": "弧线片段保留上限",
+        "hint": "每天最多保留几条建议片段，超出按日中压缩或截断",
+        "type": "int",
+        "default": 5
+      }
+    }
+  },
+  "Silence_Settings": {
+    "description": "沉默机制设置",
+    "hint": "bot 进入沉默模式的状态阈值。",
+    "type": "object",
+    "items": {
+      "silence_energy_threshold": {
+        "description": "能量沉默阈值",
+        "hint": "能量低于此值时进入低能量沉默模式",
+        "type": "int",
+        "default": 25
+      },
+      "silence_boundary_threshold": {
+        "description": "边界沉默阈值",
+        "hint": "边界压力高于此值时进入防御沉默模式",
+        "type": "int",
+        "default": 60
+      }
+    }
+  },
+  "LivingMemory_Settings": {
+    "description": "LivingMemory 协同",
+    "hint": "与 LivingMemory 插件的协同方式。CL 只检测不写入，信任 LM 管理事实记忆。",
+    "type": "object",
+    "items": {
+      "delegate_memory_to_livingmemory": {
+        "description": "委托记忆给LivingMemory",
+        "hint": "检测到LivingMemory活跃时，信任其管理长期记忆，CL不主动写入",
+        "type": "bool",
+        "default": true
+      },
+      "livingmemory_plugin_name": {
+        "description": "LivingMemory插件名称",
+        "hint": "用于检测LivingMemory插件实例的名称",
+        "type": "string",
+        "default": "LivingMemory"
+      }
+    }
+  },
+  "LLM_Settings": {
+    "description": "LLM设置",
+    "hint": "深度反思的LLM调用配置。",
+    "type": "object",
+    "items": {
+      "reflection_provider_id": {
+        "description": "深度反思LLM提供商ID",
+        "hint": "留空则使用默认LLM提供商",
+        "type": "string",
+        "_special": "select_provider",
+        "default": ""
+      },
+      "max_context_chars": {
+        "description": "最大注入上下文字符数",
+        "hint": "注入LLM的关系状态上下文最大长度（含连续性块，建议 >= 900）",
+        "type": "int",
+        "default": 900
+      }
+    }
+  }
+}
