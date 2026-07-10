@@ -1,12 +1,12 @@
 id: astrbot_plugin_companion_lite
-name: CompanionLite
-version: 1.0.0
+name: astrbot_plugin_companion_lite
+version: 1.0.1
 description: 私人陪伴场景关系感知插件。跟踪熟悉度、亲近度、安全感等关系状态，注入个性化上下文到LLM，支持沉默机制和LivingMemory协同。
-author: companion-lite
+author: 6TBWhite
 type: star
-homepage: https://github.com/companion-lite/astrbot_plugin_companion_lite
+homepage: https://github.com/6TBWhite/astrbot_plugin_companion_lite
 license: MIT
-repo: https://github.com/companion-lite/astrbot_plugin_companion_lite
+repo: https://github.com/6TBWhite/astrbot_plugin_companion_lite
 branch: main
 tags:
   - companion

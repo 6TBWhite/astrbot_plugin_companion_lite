@@ -47,7 +47,7 @@ from .state import CompanionState, StyleProfile
 from .state_engine import StateEngine
 from .storage import Storage
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 SYSTEM_COMMAND_RE = re.compile(r"(?:^|\s)/[A-Za-z0-9_\-\u4e00-\u9fff]+(?:\s|$)")
 PROCESSED_USER_MESSAGE_EXTRA = "_companion_lite_processed_user_message"
