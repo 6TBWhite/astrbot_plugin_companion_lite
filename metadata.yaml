@@ -1,7 +1,7 @@
 id: astrbot_plugin_companion_lite
 name: astrbot_plugin_companion_lite
 display_name: 陪伴Lite
-version: 1.0.1
+version: 1.0.2
 short_desc: 让 bot 记住你们之间的关系——有多熟、有多亲近、现在累不累
 description: 私人陪伴场景关系感知插件。跟踪熟悉度、亲近度、安全感等关系状态，注入个性化上下文到LLM，支持沉默机制和LivingMemory协同。
 author: 6TBWhite

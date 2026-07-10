@@ -23,17 +23,14 @@ class BasicSettings:
 
 @dataclass
 class ReflectionSettings:
-    reflection_message_interval: int = 12
-    reflection_time_interval_minutes: int = 30
+    reflection_message_interval: int = 10
+    reflection_time_interval_minutes: int = 40
 
 
 @dataclass
 class ContinuitySettings:
     enable_continuity_injection: bool = True
-    continuity_lookback_days: int = 3
-    enable_arc_finalization: bool = True
-    arc_midday_compress_threshold: int = 4
-    arc_max_segments: int = 5
+    continuity_lookback_sessions: int = 7
 
 
 @dataclass
@@ -88,32 +85,25 @@ class CLConfig:
         )
         reflection = ReflectionSettings(
             reflection_message_interval=max(
-                1, _int(_get(raw, reflection_raw, "reflection_message_interval", 12), 12)
+                1, _int(_get(raw, reflection_raw, "reflection_message_interval", 10), 10)
             ),
             reflection_time_interval_minutes=max(
-                0, _int(_get(raw, reflection_raw, "reflection_time_interval_minutes", 30), 30)
+                0, _int(_get(raw, reflection_raw, "reflection_time_interval_minutes", 40), 40)
             ),
         )
         continuity = ContinuitySettings(
             enable_continuity_injection=_bool(
                 _get(raw, continuity_raw, "enable_continuity_injection", True), True
             ),
-            continuity_lookback_days=max(
-                1, min(7, _int(_get(raw, continuity_raw, "continuity_lookback_days", 3), 3))
-            ),
-            enable_arc_finalization=_bool(
-                _get(raw, continuity_raw, "enable_arc_finalization", True), True
-            ),
-            arc_midday_compress_threshold=max(
-                0, _int(_get(raw, continuity_raw, "arc_midday_compress_threshold", 4), 4)
-            ),
-            arc_max_segments=max(
-                1, _int(_get(raw, continuity_raw, "arc_max_segments", 5), 5)
+            continuity_lookback_sessions=max(
+                3, min(20, _int(_get(raw, continuity_raw, "continuity_lookback_sessions", 7), 7))
             ),
         )
         silence = SilenceSettings(
-            energy_threshold=_int(_get(raw, silence_raw, "silence_energy_threshold", 25), 25),
-            boundary_threshold=_int(_get(raw, silence_raw, "silence_boundary_threshold", 60), 60),
+            energy_threshold=max(10, min(90, _int(_get(raw, silence_raw, "silence_energy_threshold", 25), 25))),
+            boundary_threshold=max(
+                0, min(100, _int(_get(raw, silence_raw, "silence_boundary_threshold", 60), 60))
+            ),
         )
         livingmemory = LivingMemorySettings(
             delegate_memory_to_livingmemory=_bool(

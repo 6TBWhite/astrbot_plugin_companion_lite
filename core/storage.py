@@ -37,30 +37,43 @@ class Storage:
                 timestamp REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_buffer_user ON message_buffer(user_id, timestamp);
-            CREATE TABLE IF NOT EXISTS daily_arc (
+            CREATE TABLE IF NOT EXISTS session_arc (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
-                date TEXT NOT NULL,
-                overall_mood TEXT DEFAULT '',
-                relationship_trend TEXT DEFAULT '',
-                important_interactions TEXT DEFAULT '[]',
-                tomorrow_guidance TEXT DEFAULT '',
-                source TEXT DEFAULT 'local',
-                updated_at REAL DEFAULT 0,
-                PRIMARY KEY (user_id, date)
+                started_at REAL NOT NULL,
+                last_activity_at REAL NOT NULL,
+                ended_at REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open',
+                start_snapshot TEXT NOT NULL DEFAULT '{}',
+                end_snapshot TEXT NOT NULL DEFAULT '{}',
+                peak_boundary_pressure REAL NOT NULL DEFAULT 0,
+                peak_negative_trend REAL NOT NULL DEFAULT 0,
+                peak_positive_trend REAL NOT NULL DEFAULT 0,
+                min_energy REAL NOT NULL DEFAULT 90,
+                message_count INTEGER NOT NULL DEFAULT 0,
+                turning_points TEXT NOT NULL DEFAULT '[]',
+                outcome TEXT NOT NULL DEFAULT 'ongoing',
+                summary TEXT NOT NULL DEFAULT '',
+                reflection_count INTEGER NOT NULL DEFAULT 0,
+                updated_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_session_arc_user_status
+                ON session_arc(user_id, status, last_activity_at);
+            CREATE TABLE IF NOT EXISTS interaction_profile_evidence (
+                user_id TEXT NOT NULL,
+                profile_key TEXT NOT NULL,
+                profile_value TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'observed',
+                positive_evidence INTEGER NOT NULL DEFAULT 0,
+                negative_evidence INTEGER NOT NULL DEFAULT 0,
+                confidence REAL NOT NULL DEFAULT 0,
+                first_observed_at REAL NOT NULL,
+                last_observed_at REAL NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (user_id, profile_key)
             );
         """)
-        self._migrate_daily_arc_columns(cur)
         self._conn.commit()
-
-    def _migrate_daily_arc_columns(self, cur) -> None:
-        """为老库补齐 guidance_segments / finalized / cycle_count 字段。"""
-        existing = {row[1] for row in cur.execute("PRAGMA table_info(daily_arc)").fetchall()}
-        if "guidance_segments" not in existing:
-            cur.execute("ALTER TABLE daily_arc ADD COLUMN guidance_segments TEXT DEFAULT '[]'")
-        if "finalized" not in existing:
-            cur.execute("ALTER TABLE daily_arc ADD COLUMN finalized INTEGER DEFAULT 0")
-        if "cycle_count" not in existing:
-            cur.execute("ALTER TABLE daily_arc ADD COLUMN cycle_count INTEGER DEFAULT 0")
 
     def get_state(self, user_id: str) -> dict[str, Any] | None:
         cur = self._conn.cursor()
@@ -108,11 +121,33 @@ class Storage:
     def get_recent_messages(self, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
         cur = self._conn.cursor()
         cur.execute(
-            "SELECT role, content, timestamp FROM message_buffer WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
+            "SELECT id, role, content, timestamp FROM message_buffer WHERE user_id = ? ORDER BY id DESC LIMIT ?",
             (user_id, limit),
         )
         rows = cur.fetchall()
-        return [{"role": r["role"], "content": r["content"], "timestamp": r["timestamp"]} for r in reversed(rows)]
+        return [
+            {"id": r["id"], "role": r["role"], "content": r["content"], "timestamp": r["timestamp"]}
+            for r in reversed(rows)
+        ]
+
+    def get_messages_for_reflection(self, user_id: str, limit: int = 40) -> list[dict[str, Any]]:
+        """Return the oldest pending messages so snapshot cleanup never skips history."""
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT id, role, content, timestamp FROM message_buffer "
+            "WHERE user_id = ? ORDER BY id ASC LIMIT ?",
+            (user_id, limit),
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def delete_messages_through(self, user_id: str, max_message_id: int) -> None:
+        """Delete only messages included in a completed reflection snapshot."""
+        cur = self._conn.cursor()
+        cur.execute(
+            "DELETE FROM message_buffer WHERE user_id = ? AND id <= ?",
+            (user_id, max_message_id),
+        )
+        self._conn.commit()
 
     def clear_messages(self, user_id: str) -> None:
         cur = self._conn.cursor()
@@ -137,6 +172,33 @@ class Storage:
         row = cur.fetchone()
         return row["cnt"] if row else 0
 
+    def get_latest_user_message_id(self, user_id: str) -> int:
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT id FROM message_buffer WHERE user_id = ? AND role = 'user' ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        return int(row["id"]) if row else 0
+
+    def count_completed_rounds(self, user_id: str) -> int:
+        """Count user-to-assistant exchanges without treating raw message count as rounds."""
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT role FROM message_buffer WHERE user_id = ? ORDER BY id ASC",
+            (user_id,),
+        )
+        waiting_for_assistant = False
+        completed = 0
+        for row in cur.fetchall():
+            role = row["role"]
+            if role == "user":
+                waiting_for_assistant = True
+            elif role == "assistant" and waiting_for_assistant:
+                completed += 1
+                waiting_for_assistant = False
+        return completed
+
     def count_recent_user_messages(self, user_id: str, window_seconds: int) -> int:
         since = time.time() - max(1, window_seconds)
         cur = self._conn.cursor()
@@ -156,109 +218,128 @@ class Storage:
         row = cur.fetchone()
         return row["ts"] if row and row["ts"] else None
 
-    def upsert_daily_arc(self, user_id: str, date: str, arc: dict[str, Any]) -> None:
+    def create_session_arc(self, user_id: str, snapshot: dict[str, Any], now: float) -> dict[str, Any]:
         cur = self._conn.cursor()
         cur.execute(
-            "INSERT INTO daily_arc (user_id, date, overall_mood, relationship_trend, "
-            "important_interactions, tomorrow_guidance, source, updated_at, "
-            "guidance_segments, finalized, cycle_count) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(user_id, date) DO UPDATE SET "
-            "overall_mood = excluded.overall_mood, "
-            "relationship_trend = excluded.relationship_trend, "
-            "important_interactions = excluded.important_interactions, "
-            "tomorrow_guidance = excluded.tomorrow_guidance, "
-            "source = excluded.source, "
-            "updated_at = excluded.updated_at, "
-            "guidance_segments = excluded.guidance_segments, "
-            "finalized = excluded.finalized, "
-            "cycle_count = excluded.cycle_count",
+            "INSERT INTO session_arc (user_id, started_at, last_activity_at, start_snapshot, "
+            "peak_boundary_pressure, peak_negative_trend, peak_positive_trend, min_energy, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 user_id,
-                date,
-                str(arc.get("overall_mood", "")),
-                str(arc.get("relationship_trend", "")),
-                json.dumps(arc.get("important_interactions", []), ensure_ascii=False),
-                str(arc.get("tomorrow_guidance", "")),
-                str(arc.get("source", "local")),
+                now,
+                now,
+                json.dumps(snapshot, ensure_ascii=False),
+                float(snapshot.get("boundary_pressure", 0.0)),
+                float(snapshot.get("negative_trend", 0.0)),
+                float(snapshot.get("positive_trend", 0.0)),
+                float(snapshot.get("energy", 90.0)),
+                now,
+            ),
+        )
+        self._conn.commit()
+        return self.get_session_arc(int(cur.lastrowid)) or {}
+
+    def get_session_arc(self, session_id: int) -> dict[str, Any] | None:
+        cur = self._conn.cursor()
+        cur.execute("SELECT * FROM session_arc WHERE id = ?", (session_id,))
+        row = cur.fetchone()
+        return self._session_row_to_dict(row) if row else None
+
+    def get_open_session_arc(self, user_id: str) -> dict[str, Any] | None:
+        cur = self._conn.cursor()
+        cur.execute(
+            "SELECT * FROM session_arc WHERE user_id = ? AND status = 'open' ORDER BY id DESC LIMIT 1",
+            (user_id,),
+        )
+        row = cur.fetchone()
+        return self._session_row_to_dict(row) if row else None
+
+    def update_session_arc(self, session_id: int, arc: dict[str, Any]) -> None:
+        cur = self._conn.cursor()
+        cur.execute(
+            "UPDATE session_arc SET last_activity_at=?, ended_at=?, status=?, end_snapshot=?, "
+            "peak_boundary_pressure=?, peak_negative_trend=?, peak_positive_trend=?, min_energy=?, "
+            "message_count=?, turning_points=?, outcome=?, summary=?, reflection_count=?, updated_at=? WHERE id=?",
+            (
+                float(arc.get("last_activity_at", time.time())),
+                float(arc.get("ended_at", 0.0)),
+                str(arc.get("status", "open")),
+                json.dumps(arc.get("end_snapshot", {}), ensure_ascii=False),
+                float(arc.get("peak_boundary_pressure", 0.0)),
+                float(arc.get("peak_negative_trend", 0.0)),
+                float(arc.get("peak_positive_trend", 0.0)),
+                float(arc.get("min_energy", 90.0)),
+                int(arc.get("message_count", 0)),
+                json.dumps(arc.get("turning_points", []), ensure_ascii=False),
+                str(arc.get("outcome", "ongoing")),
+                str(arc.get("summary", ""))[:240],
+                int(arc.get("reflection_count", 0)),
                 time.time(),
-                json.dumps(arc.get("guidance_segments", []), ensure_ascii=False),
-                int(bool(arc.get("finalized", False))),
-                int(arc.get("cycle_count", 0)),
+                session_id,
             ),
         )
         self._conn.commit()
 
-    def get_daily_arc(self, user_id: str, date: str) -> dict[str, Any] | None:
+    def get_recent_session_arcs(self, user_id: str, limit: int = 7, closed_only: bool = False) -> list[dict[str, Any]]:
         cur = self._conn.cursor()
-        cur.execute("SELECT * FROM daily_arc WHERE user_id = ? AND date = ?", (user_id, date))
-        row = cur.fetchone()
-        return self._arc_row_to_dict(row) if row else None
+        status_filter = "AND status = 'closed'" if closed_only else ""
+        cur.execute(
+            f"SELECT * FROM session_arc WHERE user_id = ? {status_filter} ORDER BY id DESC LIMIT ?",
+            (user_id, max(1, limit)),
+        )
+        return [self._session_row_to_dict(row) for row in cur.fetchall()]
 
-    def get_recent_arcs(self, user_id: str, days: int = 3, before_date: str = "") -> list[dict[str, Any]]:
-        """按日期降序返回 before_date（不含）之前最近 N 天的弧线。"""
-        cur = self._conn.cursor()
-        if before_date:
-            cur.execute(
-                "SELECT * FROM daily_arc WHERE user_id = ? AND date < ? ORDER BY date DESC LIMIT ?",
-                (user_id, before_date, max(1, days)),
-            )
-        else:
-            cur.execute(
-                "SELECT * FROM daily_arc WHERE user_id = ? ORDER BY date DESC LIMIT ?",
-                (user_id, max(1, days)),
-            )
-        return [self._arc_row_to_dict(row) for row in cur.fetchall()]
+    def clear_session_arcs(self, user_id: str) -> None:
+        self._conn.execute("DELETE FROM session_arc WHERE user_id = ?", (user_id,))
+        self._conn.commit()
 
-    def get_unfinalized_arc_before(self, user_id: str, date: str) -> dict[str, Any] | None:
-        """返回指定日期之前最近一条未 finalized 的弧线，用于跨天补生成。"""
+    def upsert_profile_evidence(self, user_id: str, evidence: dict[str, Any]) -> None:
+        now = time.time()
         cur = self._conn.cursor()
         cur.execute(
-            "SELECT * FROM daily_arc WHERE user_id = ? AND date < ? AND finalized = 0 "
-            "ORDER BY date DESC LIMIT 1",
-            (user_id, date),
+            "INSERT INTO interaction_profile_evidence "
+            "(user_id, profile_key, profile_value, source, positive_evidence, negative_evidence, confidence, "
+            "first_observed_at, last_observed_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(user_id, profile_key) DO UPDATE SET profile_value=excluded.profile_value, "
+            "source=excluded.source, positive_evidence=excluded.positive_evidence, "
+            "negative_evidence=excluded.negative_evidence, confidence=excluded.confidence, "
+            "last_observed_at=excluded.last_observed_at, active=excluded.active",
+            (
+                user_id,
+                str(evidence.get("key", "")),
+                str(evidence.get("value", "")),
+                str(evidence.get("source", "observed")),
+                int(evidence.get("positive_evidence", 0)),
+                int(evidence.get("negative_evidence", 0)),
+                float(evidence.get("confidence", 0.0)),
+                float(evidence.get("first_observed_at", now)),
+                float(evidence.get("last_observed_at", now)),
+                int(bool(evidence.get("active", True))),
+            ),
         )
-        row = cur.fetchone()
-        return self._arc_row_to_dict(row) if row else None
+        self._conn.commit()
 
-    def clear_daily_arcs(self, user_id: str) -> None:
+    def get_profile_evidence(self, user_id: str) -> list[dict[str, Any]]:
         cur = self._conn.cursor()
-        cur.execute("DELETE FROM daily_arc WHERE user_id = ?", (user_id,))
+        cur.execute(
+            "SELECT * FROM interaction_profile_evidence WHERE user_id = ? ORDER BY profile_key",
+            (user_id,),
+        )
+        return [dict(row) | {"active": bool(row["active"])} for row in cur.fetchall()]
+
+    def clear_profile_evidence(self, user_id: str) -> None:
+        self._conn.execute("DELETE FROM interaction_profile_evidence WHERE user_id = ?", (user_id,))
         self._conn.commit()
 
     @staticmethod
-    def _arc_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            interactions = json.loads(row["important_interactions"] or "[]")
-        except (json.JSONDecodeError, TypeError):
-            interactions = []
-        try:
-            segments = json.loads(row["guidance_segments"] or "[]")
-        except (json.JSONDecodeError, TypeError, KeyError):
-            segments = []
-        finalized = False
-        try:
-            finalized = bool(int(row["finalized"] or 0))
-        except (KeyError, TypeError, ValueError):
-            pass
-        cycle_count = 0
-        try:
-            cycle_count = int(row["cycle_count"] or 0)
-        except (KeyError, TypeError, ValueError):
-            pass
-        return {
-            "user_id": row["user_id"],
-            "date": row["date"],
-            "overall_mood": row["overall_mood"] or "",
-            "relationship_trend": row["relationship_trend"] or "",
-            "important_interactions": interactions if isinstance(interactions, list) else [],
-            "tomorrow_guidance": row["tomorrow_guidance"] or "",
-            "source": row["source"] or "local",
-            "updated_at": row["updated_at"] or 0,
-            "guidance_segments": segments if isinstance(segments, list) else [],
-            "finalized": finalized,
-            "cycle_count": cycle_count,
-        }
+    def _session_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        result = dict(row)
+        for field, default in (("start_snapshot", {}), ("end_snapshot", {}), ("turning_points", [])):
+            try:
+                result[field] = json.loads(result.get(field) or json.dumps(default))
+            except (json.JSONDecodeError, TypeError):
+                result[field] = default
+        return result
 
     def close(self) -> None:
         try:

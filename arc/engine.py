@@ -1,301 +1,279 @@
 from __future__ import annotations
 
-import logging
 import time
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from ..core.state import CompanionState
 from ..core.storage import Storage
 
-logger = logging.getLogger(__name__)
-
-# arc_trend 规范词。LLM 输出带修饰时（如"轻微靠近"），趋势统计按包含关系归一。
-TREND_VOCAB = ("靠近", "稳定", "疲惫", "拉扯", "恢复", "冷淡")
-
-# guidance 消毒：低熟悉度时出现这些词的建议直接丢弃（防"明天更亲近一点"式越级指导）。
-INTIMACY_GUIDANCE_KEYWORDS = ("表白", "亲密", "恋人", "更亲近", "撒娇", "亲昵")
-
-# cooldown/cautious 周期下，guidance 含这些词的句子跳过，只保留情绪承接部分。
-ADVANCE_KEYWORDS = ("靠近", "主动", "推进", "亲近", "热情", "撒娇")
-
-MOOD_MAX = 60
-TREND_MAX = 60
-HIGHLIGHT_MAX = 60
-HIGHLIGHT_COUNT = 3
-GUIDANCE_MAX = 120
-SEGMENT_MAX = 60
-CONTINUITY_MAX = 150
-
-# 弧线过期规则：昨天的 arc 距今超过 48 小时未更新则不注入（防过时 guidance 答非所问）。
-ARC_STALE_SECONDS = 48 * 3600
-
-LLMRequestFunc = Callable[..., Awaitable[str]]
-
-FINALIZE_SYSTEM_PROMPT = """\
-你是关系弧线总结助手。请把今天累积的多条相处建议片段压缩成一条给明天的相处指导。
-
-要求：
-- 只输出一条不超过60字的建议，不要输出任何其他内容。
-- 写给明天的相处方式（如"开场轻柔，先承接情绪，不要追问细节"），不要写对用户的评价。
-- 合并重复要点，保留最重要的1-2条意图。
-- 如果片段之间冲突，以最后一条为准（最近的反思最贴近当前状态）。
-- 如果今天出现过越界/过早亲密，不要建议靠近或主动，只写如何稳住距离。
-"""
-
 
 class ArcEngine:
-    """每日情感弧线：由反思结果逐步累积，跨天时压缩成一条 finalized 指导，供次日连续性注入。"""
+    """Structured session arcs and evidence-based interaction profile."""
 
-    def __init__(
-        self,
-        storage: Storage,
-        lookback_days: int = 3,
-        llm_request_func: LLMRequestFunc | None = None,
-        llm_provider_id: str = "",
-        enable_finalization: bool = True,
-        midday_compress_threshold: int = 4,
-        max_segments: int = 5,
-    ) -> None:
+    SESSION_IDLE_SECONDS = 60 * 60
+    MAX_TURNING_POINTS = 12
+    CONTINUITY_MAX = 220
+    OUTCOME_TEXT = {
+        "stable_warm": "上次会话稳定友善",
+        "stable_neutral": "上次会话整体平稳",
+        "warming": "上次会话逐渐升温",
+        "cooling": "上次会话有所降温",
+        "boundary_escalation": "上次会话出现明显边界压力",
+        "unresolved_tension": "上次会话仍有未消化的紧张",
+        "partial_repair": "上次会话出现修复意愿，但尚未完全恢复",
+        "recovered": "上次会话从紧张中逐步恢复",
+        "energy_exhaustion": "上次会话后段精力偏低",
+        "mixed": "上次会话有明显拉扯",
+    }
+
+    def __init__(self, storage: Storage, lookback_sessions: int = 7) -> None:
         self._storage = storage
-        self._lookback_days = max(1, min(7, lookback_days))
-        self._llm_request = llm_request_func
-        self._llm_provider_id = llm_provider_id
-        self._enable_finalization = enable_finalization
-        self._midday_compress_threshold = max(0, midday_compress_threshold)
-        self._max_segments = max(1, max_segments)
+        self._lookback_sessions = max(3, min(20, lookback_sessions))
 
-    # ---------- 写入 ----------
-
-    def update_from_reflection(self, user_id: str, result: dict, state: CompanionState) -> None:
-        """反思成功后调用。guidance 改为累积到 segments，不再覆盖 tomorrow_guidance。"""
-        mood = str(result.get("arc_mood") or "").strip()[:MOOD_MAX]
-        trend = str(result.get("arc_trend") or "").strip()[:TREND_MAX]
-        raw_guidance = str(result.get("tomorrow_guidance") or "").strip()[:GUIDANCE_MAX]
-        highlights = self._clean_highlights(result.get("arc_highlights"))
-
-        if not (mood or trend or raw_guidance or highlights):
-            return
-
-        raw_guidance = self._sanitize_guidance(raw_guidance, state)
-
-        today = time.strftime("%Y-%m-%d")
-        existing = self._storage.get_daily_arc(user_id, today) or {}
-        merged_highlights = self._merge_highlights(existing.get("important_interactions", []), highlights)
-        segments = list(existing.get("guidance_segments", []))
-        if raw_guidance:
-            segments.append(raw_guidance[:SEGMENT_MAX])
-
-        if self._midday_compress_threshold > 0 and len(segments) >= self._midday_compress_threshold:
-            segments = self._compress_segments_local(segments)
-
-        segments = segments[-self._max_segments :]
-
-        arc = {
-            "overall_mood": mood or existing.get("overall_mood", ""),
-            "relationship_trend": trend or existing.get("relationship_trend", ""),
-            "important_interactions": merged_highlights,
-            "tomorrow_guidance": existing.get("tomorrow_guidance", ""),
-            "guidance_segments": segments,
-            "finalized": existing.get("finalized", False),
-            "cycle_count": int(existing.get("cycle_count", 0)) + 1,
-            "source": existing.get("source", "local"),
+    @staticmethod
+    def state_snapshot(state: CompanionState) -> dict[str, float]:
+        return {
+            "familiarity": round(state.familiarity, 4),
+            "closeness": round(state.closeness, 4),
+            "safety": round(state.safety, 4),
+            "boundary_pressure": round(state.boundary_pressure, 4),
+            "energy": round(state.energy, 4),
+            "negative_trend": round(state.cycle_negative_weight, 4),
+            "positive_trend": round(state.cycle_positive_weight, 4),
+            "repair_trend": round(state.cycle_repair_weight, 4),
         }
-        self._storage.upsert_daily_arc(user_id, today, arc)
-        logger.debug(
-            "[CL] 弧线更新 user=%s date=%s trend=%s segments=%d cycle=%d",
+
+    def record_event(
+        self,
+        user_id: str,
+        before: dict[str, float],
+        state: CompanionState,
+        event: Any,
+        applied_deltas: dict[str, float],
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        now = now or time.time()
+        arc = self._ensure_open_session(user_id, before, now)
+        after = self.state_snapshot(state)
+        arc["last_activity_at"] = now
+        arc["end_snapshot"] = after
+        arc["message_count"] = int(arc.get("message_count", 0)) + 1
+        arc["peak_boundary_pressure"] = max(float(arc.get("peak_boundary_pressure", 0)), after["boundary_pressure"])
+        arc["peak_negative_trend"] = max(float(arc.get("peak_negative_trend", 0)), after["negative_trend"])
+        arc["peak_positive_trend"] = max(float(arc.get("peak_positive_trend", 0)), after["positive_trend"])
+        arc["min_energy"] = min(float(arc.get("min_energy", 90)), after["energy"])
+        point = self._turning_point(before, after, event, applied_deltas, now)
+        if point:
+            arc["turning_points"] = self._merge_turning_point(arc.get("turning_points", []), point)
+        self._storage.update_session_arc(int(arc["id"]), arc)
+        return arc
+
+    def record_reply(self, user_id: str, state: CompanionState, now: float | None = None) -> None:
+        now = now or time.time()
+        arc = self._storage.get_open_session_arc(user_id)
+        if not arc:
+            return
+        arc["last_activity_at"] = now
+        arc["end_snapshot"] = self.state_snapshot(state)
+        arc["min_energy"] = min(float(arc.get("min_energy", 90)), state.energy)
+        self._storage.update_session_arc(int(arc["id"]), arc)
+
+    def update_session_from_reflection(self, user_id: str, result: dict[str, Any]) -> None:
+        arc = self._storage.get_open_session_arc(user_id)
+        if not arc:
+            return
+        summary = str(result.get("reflection_summary") or "").strip()
+        if summary:
+            arc["summary"] = summary[:240]
+        arc["reflection_count"] = int(arc.get("reflection_count", 0)) + 1
+        self._storage.update_session_arc(int(arc["id"]), arc)
+
+    def close_idle_session(self, user_id: str, state: CompanionState, now: float | None = None) -> dict[str, Any] | None:
+        now = now or time.time()
+        arc = self._storage.get_open_session_arc(user_id)
+        if not arc or now - float(arc.get("last_activity_at", now)) < self.SESSION_IDLE_SECONDS:
+            return None
+        return self._close_session(arc, state, now)
+
+    def _ensure_open_session(self, user_id: str, snapshot: dict[str, float], now: float) -> dict[str, Any]:
+        arc = self._storage.get_open_session_arc(user_id)
+        if arc and now - float(arc.get("last_activity_at", now)) >= self.SESSION_IDLE_SECONDS:
+            self._close_session_from_snapshot(arc, snapshot, float(arc.get("last_activity_at", now)))
+            arc = None
+        return arc or self._storage.create_session_arc(user_id, snapshot, now)
+
+    def _close_session(self, arc: dict[str, Any], state: CompanionState, now: float) -> dict[str, Any]:
+        arc["end_snapshot"] = self.state_snapshot(state)
+        return self._finalize_arc(arc, now)
+
+    def _close_session_from_snapshot(self, arc: dict[str, Any], snapshot: dict[str, float], now: float) -> dict[str, Any]:
+        arc["end_snapshot"] = dict(snapshot)
+        return self._finalize_arc(arc, now)
+
+    def _finalize_arc(self, arc: dict[str, Any], now: float) -> dict[str, Any]:
+        arc["status"] = "closed"
+        arc["ended_at"] = now
+        arc["last_activity_at"] = min(now, float(arc.get("last_activity_at", now)))
+        arc["outcome"] = self._classify_outcome(arc)
+        self._storage.update_session_arc(int(arc["id"]), arc)
+        return arc
+
+    @classmethod
+    def _turning_point(
+        cls,
+        before: dict[str, float],
+        after: dict[str, float],
+        event: Any,
+        applied: dict[str, float],
+        now: float,
+    ) -> dict[str, Any] | None:
+        event_type = str(getattr(event, "type", "neutral"))
+        event_class = str(getattr(event, "event_class", "neutral"))
+        if event_class == "boundary_violation" or after["boundary_pressure"] - before["boundary_pressure"] >= 5:
+            kind = "boundary_escalation"
+        elif event_class == "repair" and before["boundary_pressure"] >= 5:
+            kind = "repair_attempt"
+        elif before["positive_trend"] < 2 <= after["positive_trend"]:
+            kind = "warming"
+        elif before["energy"] > 42 >= after["energy"]:
+            kind = "energy_drop"
+        elif before["energy"] <= 42 < after["energy"]:
+            kind = "energy_recovery"
+        elif abs(after["closeness"] - before["closeness"]) >= 2 or abs(after["safety"] - before["safety"]) >= 3:
+            kind = "relationship_shift"
+        else:
+            return None
+        posture = "cautious" if after["boundary_pressure"] >= 22 or after["closeness"] < 0 else "normal"
+        return {
+            "at": now,
+            "kind": kind,
+            "event_type": event_type,
+            "event_class": event_class,
+            "intensity": round(float(getattr(event, "intensity", 1.0)), 3),
+            "reason": str(getattr(event, "reason", ""))[:120],
+            "changes": {key: round(value, 4) for key, value in applied.items()},
+            "posture": posture,
+        }
+
+    @classmethod
+    def _merge_turning_point(cls, points: list[dict[str, Any]], point: dict[str, Any]) -> list[dict[str, Any]]:
+        points = list(points)
+        if points and points[-1].get("kind") == point["kind"] and point["at"] - float(points[-1].get("at", 0)) < 300:
+            points[-1] = point
+        else:
+            points.append(point)
+        return points[-cls.MAX_TURNING_POINTS :]
+
+    @staticmethod
+    def _classify_outcome(arc: dict[str, Any]) -> str:
+        start = arc.get("start_snapshot", {})
+        end = arc.get("end_snapshot", {})
+        kinds = [point.get("kind") for point in arc.get("turning_points", [])]
+        closeness_delta = float(end.get("closeness", 0)) - float(start.get("closeness", 0))
+        pressure_end = float(end.get("boundary_pressure", 0))
+        pressure_peak = float(arc.get("peak_boundary_pressure", pressure_end))
+        if float(arc.get("min_energy", 90)) <= 30:
+            return "energy_exhaustion"
+        if "boundary_escalation" in kinds:
+            if "repair_attempt" in kinds:
+                return "recovered" if pressure_end <= max(8.0, pressure_peak * 0.45) else "partial_repair"
+            return "unresolved_tension" if pressure_end >= 15 else "boundary_escalation"
+        if closeness_delta >= 3:
+            return "warming"
+        if closeness_delta <= -3:
+            return "cooling"
+        if float(arc.get("peak_positive_trend", 0)) >= 2 and pressure_peak < 15:
+            return "stable_warm"
+        if float(arc.get("peak_negative_trend", 0)) >= 1 and float(arc.get("peak_positive_trend", 0)) >= 1:
+            return "mixed"
+        return "stable_neutral"
+
+    def record_explicit_profile(self, user_id: str, event_type: str, now: float | None = None) -> None:
+        mapping = {
+            "style_length_short": ("reply_length", "short"),
+            "style_length_long": ("reply_length", "long"),
+            "style_tone_soft": ("tone", "soft"),
+            "style_tone_direct": ("tone", "direct"),
+            "rest_request": ("follow_up_questions", "avoid"),
+        }
+        mapped = mapping.get(event_type)
+        if not mapped:
+            return
+        now = now or time.time()
+        key, value = mapped
+        existing = {item["profile_key"]: item for item in self._storage.get_profile_evidence(user_id)}.get(key)
+        first_observed = float(existing.get("first_observed_at", now)) if existing else now
+        positive = int(existing.get("positive_evidence", 0)) + 1 if existing and existing.get("profile_value") == value else 1
+        self._storage.upsert_profile_evidence(
             user_id,
-            today,
-            arc["relationship_trend"],
-            len(segments),
-            arc["cycle_count"],
+            {
+                "key": key,
+                "value": value,
+                "source": "explicit",
+                "positive_evidence": positive,
+                "negative_evidence": 0,
+                "confidence": 1.0,
+                "first_observed_at": first_observed,
+                "last_observed_at": now,
+                "active": True,
+            },
         )
 
-    async def finalize_arc_for_date(self, user_id: str, date: str) -> bool:
-        """把指定日期的累积 segments 压缩成一条 finalized tomorrow_guidance。
-
-        成功返回 True；无 LLM 或无数据或失败返回 False。
-        """
-        if not self._enable_finalization:
-            return False
-        arc = self._storage.get_daily_arc(user_id, date)
-        if not arc or arc.get("finalized"):
-            return False
-        segments = arc.get("guidance_segments", []) or []
-        mood = arc.get("overall_mood", "")
-        trend = arc.get("relationship_trend", "")
-        if not segments and not mood and not trend:
-            arc["finalized"] = True
-            self._storage.upsert_daily_arc(user_id, date, arc)
-            return True
-
-        guidance = ""
-        if self._llm_request is not None and segments:
-            try:
-                guidance = await self._llm_compress_segments(segments, mood, trend)
-            except Exception as exc:
-                logger.warning("[CL] 弧线 finalize LLM 调用失败 user=%s date=%s: %s", user_id, date, exc)
-                guidance = ""
-        if not guidance:
-            guidance = segments[-1] if segments else ""
-
-        arc["tomorrow_guidance"] = guidance[:GUIDANCE_MAX]
-        arc["finalized"] = True
-        self._storage.upsert_daily_arc(user_id, date, arc)
-        logger.info(
-            "[CL] 弧线 finalize user=%s date=%s segments=%d guidance=%s",
-            user_id,
-            date,
-            len(segments),
-            arc["tomorrow_guidance"][:40],
-        )
-        return True
-
-    async def _llm_compress_segments(self, segments: list[str], mood: str, trend: str) -> str:
-        if self._llm_request is None:
-            return ""
-        seg_text = "\n".join(f"- {s}" for s in segments)
-        user_prompt = f"今天整体走势：{mood or '未知'}，趋势：{trend or '未知'}。\n累积建议片段：\n{seg_text}"
-        resp = await self._llm_request(
-            prompt=user_prompt,
-            system_prompt=FINALIZE_SYSTEM_PROMPT,
-            provider_id=self._llm_provider_id or "",
-        )
-        text = (resp or "").strip()
-        if "```" in text:
-            text = text.split("```")[0].strip() or text
-        return text[:SEGMENT_MAX]
-
-    @staticmethod
-    def _compress_segments_local(segments: list[str]) -> list[str]:
-        """日中压缩：无 LLM 时的本地兜底，保留首尾两条 + 中间去重。"""
-        if len(segments) <= 1:
-            return segments
-        head = segments[0]
-        tail = segments[-1]
-        return [head, tail]
-
-    @staticmethod
-    def _clean_highlights(raw: object) -> list[str]:
-        if not isinstance(raw, list):
-            return []
-        cleaned = []
-        for item in raw[:HIGHLIGHT_COUNT]:
-            text = str(item).strip()[:HIGHLIGHT_MAX]
-            if text:
-                cleaned.append(text)
-        return cleaned
-
-    @staticmethod
-    def _merge_highlights(old: list, new: list[str]) -> list[str]:
-        """合并去重，保留最新的 3 条（新条目优先）。"""
-        merged: list[str] = []
-        old_list = [str(x) for x in old if isinstance(old, list)]
-        for item in list(new) + old_list:
-            if item and item not in merged:
-                merged.append(item)
-        return merged[:HIGHLIGHT_COUNT]
-
-    @staticmethod
-    def _sanitize_guidance(guidance: str, state: CompanionState) -> str:
-        if not guidance:
-            return ""
-        if state.familiarity < 8.0 and any(kw in guidance for kw in INTIMACY_GUIDANCE_KEYWORDS):
-            logger.debug("[CL] guidance 消毒：低熟悉度亲密建议被丢弃: %s", guidance)
-            return ""
-        return guidance
-
-    # ---------- 读取 / 注入 ----------
-
-    def build_continuity_text(self, user_id: str, today: str = "", cycle_dominant: str = "normal") -> str:
-        """读取昨天的 finalized arc + 近 N 天 trend 序列，现算连续性提示。无昨日弧线返回空。"""
-        today = today or time.strftime("%Y-%m-%d")
-        arcs = self._storage.get_recent_arcs(user_id, days=self._lookback_days, before_date=today)
-        if not arcs:
-            return ""
-        yesterday_arc = arcs[0]
-        # 过期检查：最近一条弧线超过 48 小时未更新则整块不注入。
-        if time.time() - float(yesterday_arc.get("updated_at") or 0) > ARC_STALE_SECONDS:
-            return ""
-
+    def build_continuity_text(self, user_id: str, cycle_dominant: str = "normal") -> str:
+        arcs = self._storage.get_recent_session_arcs(user_id, limit=self._lookback_sessions, closed_only=True)
         parts: list[str] = []
-        mood = yesterday_arc.get("overall_mood", "")
-        guidance = yesterday_arc.get("tomorrow_guidance", "")
-        # 只注入 finalized 的 guidance；未 finalize 的降级只用 mood+trend，避免答非所问。
-        if not yesterday_arc.get("finalized"):
-            guidance = ""
-        if cycle_dominant in ("cooldown", "cautious"):
-            guidance = self._strip_advance_sentences(guidance)
-        if mood and guidance:
-            parts.append(f"上次相处整体{mood}。{guidance}")
-        elif mood:
-            parts.append(f"上次相处整体{mood}。")
-        elif guidance:
-            parts.append(guidance)
+        if arcs:
+            latest = arcs[0]
+            outcome = str(latest.get("outcome") or "stable_neutral")
+            parts.append(self.OUTCOME_TEXT.get(outcome, "上次会话整体平稳") + "。")
+            if outcome in {"boundary_escalation", "unresolved_tension", "partial_repair", "mixed"}:
+                parts.append("本次先保持克制，少追问，不主动推进关系。")
+            elif outcome == "recovered":
+                parts.append("可以自然回应，但让恢复继续由稳定互动确认。")
+            elif outcome in {"warming", "stable_warm"} and cycle_dominant not in {"cooldown", "cautious"}:
+                parts.append("可以略微温和，但不越过当前边界。")
+            outcomes = [str(arc.get("outcome") or "") for arc in arcs]
+            tense = {"boundary_escalation", "unresolved_tension", "partial_repair", "mixed"}
+            if sum(item in tense for item in outcomes) >= 2:
+                parts.append("近期边界压力反复出现，避免主动升级亲密。")
+        profile_text = self.build_profile_text(user_id)
+        if profile_text:
+            parts.append(profile_text)
+        return "".join(parts)[: self.CONTINUITY_MAX]
 
-        trend_text = self._trend_text([a.get("relationship_trend", "") for a in reversed(arcs)])
-        if trend_text:
-            parts.append(trend_text)
-
-        text = "".join(parts).strip()
-        return text[:CONTINUITY_MAX]
-
-    def build_today_arc_brief(self, user_id: str) -> str:
-        """给反思 LLM 看的今日弧线背景摘要（定长，~80字）。未 finalize 也注入，让反思知道今天走向。"""
-        today = time.strftime("%Y-%m-%d")
-        arc = self._storage.get_daily_arc(user_id, today)
+    def build_session_brief(self, user_id: str) -> str:
+        arc = self._storage.get_open_session_arc(user_id)
         if not arc:
             return ""
-        mood = arc.get("overall_mood", "")
-        trend = arc.get("relationship_trend", "")
-        seg_count = len(arc.get("guidance_segments", []))
-        parts = []
-        if mood:
-            parts.append(f"走势:{mood}")
-        if trend:
-            parts.append(f"趋势:{trend}")
-        if seg_count:
-            parts.append(f"已累积{seg_count}条建议片段")
-        if not parts:
-            return ""
-        return "今日弧线：" + "，".join(parts) + "。"
+        kinds = [str(point.get("kind") or "") for point in arc.get("turning_points", [])]
+        parts = [f"当前会话已记录{arc.get('message_count', 0)}条用户消息"]
+        if kinds:
+            parts.append("转折:" + ",".join(kinds[-4:]))
+        parts.append(f"边界峰值{float(arc.get('peak_boundary_pressure', 0)):.0f}")
+        return "会话轨迹：" + "，".join(parts) + "。"
 
-    @staticmethod
-    def _strip_advance_sentences(guidance: str) -> str:
-        """cooldown/cautious 周期下移除含'靠近/主动/推进'类词的句子，保留情绪承接部分。"""
-        if not guidance:
-            return ""
-        sentences = [s for s in guidance.replace("；", "。").split("。") if s.strip()]
-        kept = [s for s in sentences if not any(kw in s for kw in ADVANCE_KEYWORDS)]
-        return "。".join(kept) + "。" if kept else ""
+    def build_profile_text(self, user_id: str) -> str:
+        evidence = [
+            item
+            for item in self._storage.get_profile_evidence(user_id)
+            if item.get("active") and float(item.get("confidence", 0)) >= 0.8
+        ]
+        labels = {
+            ("reply_length", "short"): "用户明确偏好简短回复",
+            ("reply_length", "long"): "用户明确偏好详细回复",
+            ("tone", "soft"): "用户明确偏好温和语气",
+            ("tone", "direct"): "用户明确偏好直接表达",
+            ("follow_up_questions", "avoid"): "用户明确希望少追问",
+        }
+        parts = [labels.get((item["profile_key"], item["profile_value"]), "") for item in evidence]
+        parts = [part for part in parts if part]
+        return "；".join(parts[:2]) + "。" if parts else ""
 
-    def _trend_text(self, trends: list[str]) -> str:
-        trends = [t for t in trends if t]
-        if not trends:
-            return ""
-        normalized = [self._normalize_trend(t) for t in trends]
-        if len(set(trends)) == 1:
-            text = f"近几天持续{trends[0]}。"
-        elif len(trends) >= 2 and trends[-1] != trends[-2]:
-            text = f"近几天从{trends[-2]}转向{trends[-1]}。"
-        else:
-            text = f"近几天趋势：{' -> '.join(trends)}。"
-        if normalized.count("疲惫") >= 2:
-            text += "注意近几天能量偏低，整体收着点。"
-        if normalized.count("拉扯") >= 2:
-            text += "最近反复拉扯，避免主动推进关系。"
-        return text
+    def get_open_session(self, user_id: str) -> dict | None:
+        return self._storage.get_open_session_arc(user_id)
 
-    @staticmethod
-    def _normalize_trend(trend: str) -> str:
-        for vocab in TREND_VOCAB:
-            if vocab in trend:
-                return vocab
-        return trend
+    def get_recent_sessions(self, user_id: str, limit: int = 7) -> list[dict]:
+        return self._storage.get_recent_session_arcs(user_id, limit=limit)
 
-    # ---------- 面板 ----------
-
-    def get_today_arc(self, user_id: str) -> dict | None:
-        return self._storage.get_daily_arc(user_id, time.strftime("%Y-%m-%d"))
-
-    def get_recent_arcs(self, user_id: str, days: int = 7) -> list[dict]:
-        return self._storage.get_recent_arcs(user_id, days=days)
+    def get_interaction_profile(self, user_id: str) -> list[dict]:
+        return self._storage.get_profile_evidence(user_id)

@@ -23,12 +23,12 @@ class SilenceMechanism:
         stance = state.boundary_stance()
 
         if mode == "strong_boundary":
-            return "强边界收敛：极简回应，不展开不追问，平静克制，不冷嘲不赌气。"
+            return "强边界策略：完整处理本轮必要事项，只答核心；不追问、不延伸、不暧昧，平静克制。"
         if mode == "defensive":
-            return f"防御姿态({stance})：简短回应，不延伸不追问，保持礼貌稳定。"
+            return f"边界收敛({stance})：先答核心，减少铺陈；不主动延伸、不追问，保持礼貌稳定。"
         if mode == "tired_low":
-            return "疲惫低落：1-2句温柔简短回应，可收束对话，不展开新话题。"
-        return "精力不足：简短回应，温柔暗示想休息，不开启新话题。"
+            return "低余裕策略：完整回答核心后自然收束；语气温和，少铺陈，不开启新话题。"
+        return "低余裕策略：完整回答核心，减少寒暄、重复解释、额外建议和非必要追问；不要声称或暗示 bot 困倦、受伤或需要休息。"
 
     def should_inject_silence(self, state: CompanionState) -> tuple[bool, str]:
         mode = self.check(state)

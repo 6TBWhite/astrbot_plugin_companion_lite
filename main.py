@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import time
 from pathlib import Path
@@ -41,7 +42,7 @@ from .config import CLConfig, load_config
 from .llm import ContextBuilder, DeepReflection, SilenceMechanism
 from .core import CompanionState, StyleProfile, StateEngine, EventEngine, Storage
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 SYSTEM_COMMAND_RE = re.compile(r"(?:^|\s)/[A-Za-z0-9_\-\u4e00-\u9fff]+(?:\s|$)")
 PROCESSED_USER_MESSAGE_EXTRA = "_companion_lite_processed_user_message"
@@ -68,12 +69,7 @@ class CompanionLitePlugin(Star):
         self.context_builder = ContextBuilder(self.state_engine)
         self.arc_engine = ArcEngine(
             self.storage,
-            lookback_days=self.plugin_config.continuity.continuity_lookback_days,
-            llm_request_func=self._llm_generate,
-            llm_provider_id=self.plugin_config.llm.reflection_provider_id or "",
-            enable_finalization=self.plugin_config.continuity.enable_arc_finalization,
-            midday_compress_threshold=self.plugin_config.continuity.arc_midday_compress_threshold,
-            max_segments=self.plugin_config.continuity.arc_max_segments,
+            lookback_sessions=self.plugin_config.continuity.continuity_lookback_sessions,
         )
         self.livingmemory = LivingMemoryIntegration(
             context=context,
@@ -94,6 +90,7 @@ class CompanionLitePlugin(Star):
         self._reflection_tasks_by_user: dict[str, asyncio.Task] = {}
         self._last_reflection_ts: float = 0.0
         self._last_injected_context_by_user: dict[str, dict[str, Any]] = {}
+        self._response_locks_by_user: dict[str, asyncio.Lock] = {}
 
         self._register_page_api()
 
@@ -138,6 +135,9 @@ class CompanionLitePlugin(Star):
             self._initialized = True
             self._init_error = None
             logger.info("[CL] 初始化完成")
+            decay_task = asyncio.create_task(self._periodic_decay_loop())
+            self._background_tasks.add(decay_task)
+            decay_task.add_done_callback(self._background_tasks.discard)
         except Exception as exc:
             self._initialized = False
             self._init_error = str(exc)
@@ -149,6 +149,27 @@ class CompanionLitePlugin(Star):
         self._reflection_tasks_by_user.clear()
         self.storage.close()
         logger.info("[CL] 已停止")
+
+    DECAY_INTERVAL_SECONDS = 300.0  # 每5分钟跑一次自然演化
+
+    async def _periodic_decay_loop(self) -> None:
+        """后台定时跑 apply_time_decay + 兜底反思，确保没人发消息时精力也能自然演化。"""
+        while True:
+            await asyncio.sleep(self.DECAY_INTERVAL_SECONDS)
+            try:
+                for user_id in self.binding.user_ids:
+                    async with self._response_lock(user_id):
+                        state = await self._load_state(user_id)
+                        previous_updated_at = state.last_state_updated_at
+                        changed = self.state_engine.apply_time_decay(state)
+                        if changed or state.last_state_updated_at != previous_updated_at:
+                            self._save_state(user_id, state)
+                        self.arc_engine.close_idle_session(user_id, state)
+                    await self._maybe_trigger_idle_reflection(user_id)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("[CL] 定时 decay 异常: %s", exc)
 
     async def _llm_generate(self, prompt: str, system_prompt: str = "", provider_id: str = "") -> str:
         try:
@@ -196,12 +217,15 @@ class CompanionLitePlugin(Star):
         record = self.storage.get_state(user_id)
         if record:
             return CompanionState.from_dict(record)
-        return CompanionState(user_id=user_id)
+        state = CompanionState(user_id=user_id)
+        self._save_state(user_id, state)
+        return state
 
     async def _load_state_with_decay(self, user_id: str, save: bool = False) -> CompanionState:
         state = await self._load_state(user_id)
+        previous_updated_at = state.last_state_updated_at
         changed = self.state_engine.apply_time_decay(state)
-        if save and changed:
+        if save and (changed or state.last_state_updated_at != previous_updated_at):
             self._save_state(user_id, state)
         return state
 
@@ -220,27 +244,68 @@ class CompanionLitePlugin(Star):
     def _max_buffer_messages(self) -> int:
         return self.plugin_config.basic.max_buffer_messages
 
-    def _reflection_ready_messages(self, user_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        messages = self.storage.get_recent_messages(user_id, limit=limit)
+    def _response_lock(self, user_id: str) -> asyncio.Lock:
+        lock = self._response_locks_by_user.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._response_locks_by_user[user_id] = lock
+        return lock
+
+    def _reply_workload_key(self, event: AstrMessageEvent, user_id: str, text: str) -> str:
+        message_obj = getattr(event, "message_obj", None)
+        source_id = str(getattr(message_obj, "message_id", "") or "")
+        if not source_id:
+            source_id = str(self.storage.get_latest_user_message_id(user_id))
+        payload = f"{user_id}\0{source_id}\0{text}".encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    def _reflection_ready_messages(self, user_id: str, limit: int = 40) -> list[dict[str, Any]]:
+        messages = self.storage.get_messages_for_reflection(user_id, limit=limit)
         return [m for m in messages if not self._is_system_command_text(str(m.get("content") or ""))]
 
     async def _maybe_trigger_reflection(self, user_id: str, state: CompanionState, style: StyleProfile) -> None:
         if not self.plugin_config.basic.enable_deep_reflection:
             return
-        msg_count = self.storage.count_messages(user_id)
+        completed_rounds = self.storage.count_completed_rounds(user_id)
         interval = self.plugin_config.reflection.reflection_message_interval
-        time_interval = self.plugin_config.reflection.reflection_time_interval_minutes * 60
-        now = time.time()
-        if msg_count < interval:
+        if completed_rounds < interval:
             return
-        if now - state.last_deep_reflection_at < time_interval:
-            return
-        state.last_deep_reflection_at = now
-        self._save_state(user_id, state)
-        messages = self._reflection_ready_messages(user_id, limit=20)
+        # 完成预设问答轮数后立即反思，不受静默收尾时间限制。
+        messages = self._reflection_ready_messages(user_id, limit=max(40, interval * 2 + 4))
         if not messages:
             return
-        self._queue_reflection(user_id, state, style, messages)
+        if self._queue_reflection(user_id, state, style, messages):
+            logger.info("[CL] 满轮反思触发 user=%s, rounds=%d", user_id, completed_rounds)
+
+    async def _maybe_trigger_idle_reflection(self, user_id: str) -> None:
+        """未满轮次时，最后一条用户消息静默足够久后提前收尾。"""
+        if not self.plugin_config.basic.enable_deep_reflection:
+            return
+        state = await self._load_state(user_id)
+        style = await self._load_style(user_id)
+        msg_count = self.storage.count_messages(user_id)
+        completed_rounds = self.storage.count_completed_rounds(user_id)
+        interval = self.plugin_config.reflection.reflection_message_interval
+        idle_seconds = self.plugin_config.reflection.reflection_time_interval_minutes * 60
+        now = time.time()
+        if msg_count < 1:
+            return
+        # 已经达到触发轮数的正常路径会在 Bot 回复入库后立即处理。
+        if completed_rounds >= interval:
+            await self._maybe_trigger_reflection(user_id, state, style)
+            return
+        # 距最后一条消息不足静默时间，不触发
+        chat_gap = now - (state.last_chat_at or now)
+        if chat_gap < idle_seconds:
+            return
+        # 已经反思过且没有新消息，不重复触发
+        if state.last_deep_reflection_at >= (state.last_chat_at or now):
+            return
+        messages = self._reflection_ready_messages(user_id, limit=max(40, interval * 2 + 4))
+        if not messages:
+            return
+        if self._queue_reflection(user_id, state, style, messages):
+            logger.info("[CL] 静默收尾反思触发 user=%s, msgs=%d, idle=%.0fs", user_id, msg_count, chat_gap)
 
     async def _capture_user_interaction(
         self, user_id: str, text: str
@@ -258,14 +323,24 @@ class CompanionLitePlugin(Star):
         interaction_event = EventEngine.classify(text, rate)
         event_type = interaction_event.type
 
-        state = await self._load_state_with_decay(user_id, save=False)
-        style = await self._load_style(user_id)
-        update = self.state_engine.apply_event(state, interaction_event)
-        EventEngine.apply_style_update(style, event_type)
+        async with self._response_lock(user_id):
+            state = await self._load_state_with_decay(user_id, save=False)
+            style = await self._load_style(user_id)
+            before_snapshot = self.arc_engine.state_snapshot(state)
+            update = self.state_engine.apply_event(state, interaction_event)
+            EventEngine.apply_style_update(style, event_type)
+            self.arc_engine.record_event(
+                user_id,
+                before_snapshot,
+                state,
+                interaction_event,
+                update.deltas,
+            )
+            self.arc_engine.record_explicit_profile(user_id, event_type)
 
-        self._save_state(user_id, state)
-        self._save_style(user_id, style)
-        self.storage.append_message(user_id, "user", text, max_messages=self._max_buffer_messages())
+            self._save_state(user_id, state)
+            self._save_style(user_id, style)
+            self.storage.append_message(user_id, "user", text, max_messages=self._max_buffer_messages())
 
         logger.debug(
             "[CL] LLM链路消息捕获: user=%s, event=%s, state=%s/%s/%s, energy=%.1f",
@@ -279,7 +354,6 @@ class CompanionLitePlugin(Star):
         if update.deltas:
             logger.debug("[CL] 状态变化: user=%s, reason=%s, deltas=%s", user_id, update.reason, update.deltas)
 
-        await self._maybe_trigger_reflection(user_id, state, style)
         return state, style
 
     def _queue_reflection(
@@ -309,45 +383,33 @@ class CompanionLitePlugin(Star):
         if exc is not None:
             logger.warning("[CL] 反思任务异常 user=%s: %s", user_id, exc, exc_info=exc)
 
-    async def _maybe_finalize_yesterday_arc(self, user_id: str) -> None:
-        """跨天补生成：检测昨天（或更早）有没有未 finalize 的弧线，有就压缩收尾。"""
-        if not self.plugin_config.continuity.enable_arc_finalization:
-            return
-        today = time.strftime("%Y-%m-%d")
-        try:
-            stale = self.storage.get_unfinalized_arc_before(user_id, today)
-            if not stale:
-                return
-            stale_date = stale.get("date", "")
-            if not stale_date:
-                return
-            logger.info("[CL] 检测到未收尾弧线 user=%s date=%s，开始补生成", user_id, stale_date)
-            await self.arc_engine.finalize_arc_for_date(user_id, stale_date)
-        except Exception as exc:
-            logger.warning("[CL] 昨日弧线补生成失败 user=%s: %s", user_id, exc)
-
     async def _run_reflection(self, user_id: str, state: CompanionState, style: StyleProfile, messages: list[dict]) -> None:
         logger.info("[CL] 开始深度反思 user=%s, messages=%d", user_id, len(messages))
-        # 跨天补生成：新一天首次反思时，先把昨天未 finalize 的弧线收尾。
-        await self._maybe_finalize_yesterday_arc(user_id)
-        result = await self.reflection.reflect(state, style, messages, arc_brief=self.arc_engine.build_today_arc_brief(user_id))
+        snapshot_max_id = max((int(message.get("id") or 0) for message in messages), default=0)
+        result = await self.reflection.reflect(state, style, messages, arc_brief=self.arc_engine.build_session_brief(user_id))
         if result:
-            self.reflection.apply_result(state, style, result)
-            try:
-                self.arc_engine.update_from_reflection(user_id, result, state)
-            except Exception as exc:
-                logger.warning("[CL] 弧线更新失败（不影响状态更新）user=%s: %s", user_id, exc)
-            self.state_engine.reset_cycle_after_reflection(state)
-            self._save_state(user_id, state)
-            self._save_style(user_id, style)
+            async with self._response_lock(user_id):
+                # LLM 返回时重新加载，避免覆盖反思期间的新事件和回复工作量。
+                latest_state = await self._load_state(user_id)
+                latest_style = await self._load_style(user_id)
+                self.reflection.apply_result(latest_state, latest_style, result)
+                latest_state.last_deep_reflection_at = time.time()
+                try:
+                    self.arc_engine.update_session_from_reflection(user_id, result)
+                except Exception as exc:
+                    logger.warning("[CL] 弧线更新失败（不影响状态更新）user=%s: %s", user_id, exc)
+                self.state_engine.reset_cycle_after_reflection(latest_state, reflected_state=state)
+                self._save_state(user_id, latest_state)
+                self._save_style(user_id, latest_style)
             logger.info(
                 "[CL] 深度反思完成 user=%s: familiarity=%.1f, closeness=%.1f, mood=%s",
                 user_id,
-                state.familiarity,
-                state.closeness,
-                state.mood,
+                latest_state.familiarity,
+                latest_state.closeness,
+                latest_state.mood,
             )
-            self.storage.clear_messages(user_id)
+            if snapshot_max_id:
+                self.storage.delete_messages_through(user_id, snapshot_max_id)
         else:
             self.storage.trim_messages(user_id, self._max_buffer_messages())
             logger.warning("[CL] 深度反思无有效结果，保留消息缓冲 user=%s", user_id)
@@ -434,10 +496,21 @@ class CompanionLitePlugin(Star):
                 logger.debug("[CL] 注入沉默意图 user=%s, mode=%s", user_id, self.silence.check(state))
 
         bot_name = await self._resolve_bot_name(event)
+        max_context_chars = self.plugin_config.llm.max_context_chars
+        reserved_silence = min(len(silence_block) + 1, max_context_chars) if silence_block else 0
         context_text = self._build_context_text(
-            state, style, self.plugin_config.llm.max_context_chars, bot_name, user_id=user_id
+            state,
+            style,
+            max(0, max_context_chars - reserved_silence),
+            bot_name,
+            user_id=user_id,
         )
-        combined = f"{context_text}\n{silence_block}" if silence_block else context_text
+        if silence_block:
+            remaining = max(0, max_context_chars - len(context_text) - (1 if context_text else 0))
+            silence_block = silence_block[:remaining]
+            combined = f"{context_text}\n{silence_block}" if context_text else silence_block
+        else:
+            combined = context_text
         self._last_injected_context_by_user[user_id] = {
             "timestamp": time.time(),
             "text": combined,
@@ -483,7 +556,30 @@ class CompanionLitePlugin(Star):
 
         text = (getattr(resp, "completion_text", "") or "").strip()
         if text:
-            self.storage.append_message(user_id, "assistant", text, max_messages=self._max_buffer_messages())
+            async with self._response_lock(user_id):
+                state = await self._load_state_with_decay(user_id, save=False)
+                workload = self.state_engine.apply_reply_workload(
+                    state,
+                    text,
+                    response_key=self._reply_workload_key(event, user_id, text),
+                )
+                if workload.duplicate:
+                    logger.debug("[CL] 忽略重复最终回复回调 user=%s", user_id)
+                    return
+                self._save_state(user_id, state)
+                self.arc_engine.record_reply(user_id, state)
+                self.storage.append_message(user_id, "assistant", text, max_messages=self._max_buffer_messages())
+                style = await self._load_style(user_id)
+                logger.debug(
+                    "[CL] 回复工作量 user=%s chars=%d sentences=%d questions=%d code=%d cost=%.3f",
+                    user_id,
+                    workload.chars,
+                    workload.sentences,
+                    workload.questions,
+                    workload.code_chars,
+                    workload.cost,
+                )
+            await self._maybe_trigger_reflection(user_id, state, style)
 
     @filter.command("cp_status")
     @filter.permission_type(PermissionType.ADMIN)
@@ -497,11 +593,12 @@ class CompanionLitePlugin(Star):
             f"  关系阶段: {state.relationship_label()}",
             f"  陪伴模式: {'开启' if state.bonded else '关闭'}",
             f"  熟悉度: {state.familiarity:.1f}  亲近度: {state.closeness:.1f}",
-            f"  边界压力: {state.boundary_pressure:.1f}  能量: {state.energy:.1f}",
+            f"  安全感: {state.safety:.1f}  边界压力: {state.boundary_pressure:.1f}  能量: {state.energy:.1f}",
             f"  边界姿态: {state.boundary_stance()}",
-            f"  当前回复姿态: {state.last_posture or self.state_engine.explain_posture(state)}",
+            f"  当前回复姿态: {self.state_engine.explain_posture(state)}",
             f"  已观察消息: {state.messages_seen}",
             f"  最近事件: {state.last_event} ({state.last_event_reason or '无说明'})",
+            f"  最近回复工作量: {state.last_reply_workload:.2f} ({state.last_reply_chars} 字)",
             f"  表达偏好: 长度={style.preferred_length}, 语气={style.preferred_tone}, 主动={style.preferred_initiative}",
         ]
         lm = "激活" if self.livingmemory.active else "未激活"
@@ -528,12 +625,14 @@ class CompanionLitePlugin(Star):
             f"熟悉度: {state.familiarity:.1f}/100",
             f"亲近度: {state.closeness:.1f} (-50..100)",
             f"边界压力: {state.boundary_pressure:.1f}/100",
+            f"安全感: {state.safety:.1f}/100",
             f"能量: {state.energy:.1f}/90",
             f"边界姿态: {state.boundary_stance()}",
-            f"当前回复姿态: {state.last_posture or self.state_engine.explain_posture(state)}",
+            f"当前回复姿态: {self.state_engine.explain_posture(state)}",
             f"已观察消息: {state.messages_seen}",
             f"最近事件: {state.last_event}",
             f"最近事件原因: {state.last_event_reason or '-'}",
+            f"最近回复工作量: {state.last_reply_workload:.2f} ({state.last_reply_chars} 字, {state.last_reply_sentences} 句)",
             f"最近反思摘要: {state.last_reflection_summary or '-'}",
             f"上次深度反思: {last_reflection}",
             "",
@@ -551,6 +650,8 @@ class CompanionLitePlugin(Star):
         self.storage.clear_messages(user_id)
         self.storage.save_state(user_id, CompanionState(user_id=user_id).to_dict())
         self.storage.save_style_profile(user_id, StyleProfile(user_id=user_id).to_dict())
+        self.storage.clear_profile_evidence(user_id)
+        self.storage.clear_session_arcs(user_id)
         yield event.plain_result(f"已重置关系状态: {user_id}")
 
     @filter.command("bond")
@@ -614,6 +715,8 @@ class CompanionLitePlugin(Star):
         state = await self._load_state(user_id)
         state.energy = 15.0
         state.mood = "疲惫"
+        state.mood_intensity = 1.0
+        state.mood_updated_at = time.time()
         self._save_state(user_id, state)
         yield event.plain_result(f"已手动进入低能量模式: {user_id} (energy=15)")
 
@@ -645,7 +748,8 @@ class CompanionLitePlugin(Star):
         result = state.to_dict()
         result["relationship_label"] = state.relationship_label()
         result["boundary_stance"] = state.boundary_stance()
-        result["posture_explanation"] = state.last_posture or self.state_engine.explain_posture(state)
+        result["posture_explanation"] = self.state_engine.explain_posture(state)
+        result["posture_axes"] = self.state_engine.posture_axes(state).__dict__
         result["silence_active"] = self.silence.check(state) is not None
         result["last_injected_context"] = self._last_injected_context_by_user.get(user_id, {})
         return json_response(result)
@@ -683,9 +787,11 @@ class CompanionLitePlugin(Star):
                 "reflection_enabled": self.plugin_config.basic.enable_deep_reflection,
                 "livingmemory_active": livingmemory_active,
                 "buffer_count": self.storage.count_messages(user_id) if user_id else 0,
+                "completed_rounds": self.storage.count_completed_rounds(user_id) if user_id else 0,
                 "last_reflection": self._last_reflection_ts,
                 "background_tasks": len(self._background_tasks),
                 "reflection_tasks": len(self._reflection_tasks_by_user),
+                "reflection_message_interval": self.plugin_config.reflection.reflection_message_interval,
             }
         )
 
@@ -696,6 +802,8 @@ class CompanionLitePlugin(Star):
         self.storage.clear_messages(user_id)
         self.storage.save_state(user_id, CompanionState(user_id=user_id).to_dict())
         self.storage.save_style_profile(user_id, StyleProfile(user_id=user_id).to_dict())
+        self.storage.clear_profile_evidence(user_id)
+        self.storage.clear_session_arcs(user_id)
         return json_response({"ok": True, "user_id": user_id})
 
     async def _api_clear_messages(self):
@@ -709,7 +817,8 @@ class CompanionLitePlugin(Star):
         user_id = await self._resolve_user_id()
         if not user_id:
             return json_response({"error": "no_bound_user"})
-        self.storage.clear_daily_arcs(user_id)
+        self.storage.clear_session_arcs(user_id)
+        self.storage.clear_profile_evidence(user_id)
         return json_response({"ok": True})
 
     async def _api_trigger_reflection(self):
@@ -718,7 +827,7 @@ class CompanionLitePlugin(Star):
             return json_response({"error": "no_bound_user"})
         state = await self._load_state(user_id)
         style = await self._load_style(user_id)
-        messages = self._reflection_ready_messages(user_id, limit=20)
+        messages = self._reflection_ready_messages(user_id, limit=max(40, self.plugin_config.reflection.reflection_message_interval * 2 + 4))
         if not messages:
             return json_response({"ok": True, "skipped": True, "reason": "no_messages"})
         queued = self._queue_reflection(user_id, state, style, messages)
@@ -729,8 +838,8 @@ class CompanionLitePlugin(Star):
         if not user_id:
             return json_response({"error": "no_bound_user"})
         state = await self._load_state(user_id)
-        today_arc = self.arc_engine.get_today_arc(user_id)
-        recent = self.arc_engine.get_recent_arcs(user_id, days=7)
+        sessions = self.arc_engine.get_recent_sessions(user_id, limit=7)
+        interaction_profile = self.arc_engine.get_interaction_profile(user_id)
         continuity_text = ""
         if self.plugin_config.continuity.enable_continuity_injection:
             try:
@@ -741,11 +850,11 @@ class CompanionLitePlugin(Star):
                 logger.warning("[CL] 连续性预览生成失败 user=%s: %s", user_id, exc)
         return json_response(
             {
-                "today": today_arc,
-                "recent": recent,
+                "open_session": self.arc_engine.get_open_session(user_id),
+                "sessions": sessions,
+                "interaction_profile": interaction_profile,
                 "continuity_text": continuity_text,
                 "continuity_enabled": self.plugin_config.continuity.enable_continuity_injection,
-                "lookback_days": self.plugin_config.continuity.continuity_lookback_days,
-                "arc_finalization_enabled": self.plugin_config.continuity.enable_arc_finalization,
+                "lookback_sessions": self.plugin_config.continuity.continuity_lookback_sessions,
             }
         )

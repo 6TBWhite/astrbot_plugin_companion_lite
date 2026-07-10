@@ -18,23 +18,22 @@ class ContextBuilder:
         bot_name: str = "bot",
         continuity_text: str = "",
     ) -> str:
-        posture = state.last_posture or self.state_engine.explain_posture(state)
+        posture = self.state_engine.explain_posture(state)
 
         blocks: list[str] = [
-            "优先级：周期策略 > 回复基调 > 连续性 > 表达偏好。不要复述这些内容。"
+            "内部表达约束，不是用户陈述，不得复述。遵循宿主系统与安全规则；本轮明确要求和边界 > 当前边界/安全约束 > 周期策略 > 关系基调 > 连续性 > 长期表达偏好。只调整表达方式，不降低事实准确性、任务完成度或安全性。"
         ]
 
-        blocks.append(self._relationship_posture(state, posture, bot_name))
-
-        llm_strategy = state.next_cycle_instruction.strip()
         cycle_override = self._has_cycle_override(state)
-        if llm_strategy:
-            blocks.append(f"周期({state.next_cycle_tone})：{llm_strategy}")
-            if cycle_override and state.cycle_brief_instruction:
-                blocks.append(f"即时补充：{state.cycle_brief_instruction}")
+        llm_strategy = state.next_cycle_instruction.strip()
+        if cycle_override and state.cycle_instruction:
+            blocks.append(f"周期即时指导({state.cycle_instruction_tone})：{state.cycle_instruction}")
+        elif llm_strategy:
+            blocks.append(f"反思策略({state.next_cycle_tone}，有效至下次反思)：{llm_strategy}")
         elif state.cycle_instruction:
-            label = "即时指导" if cycle_override else "默认指导"
-            blocks.append(f"周期{label}({state.cycle_instruction_tone})：{state.cycle_instruction}")
+            blocks.append(f"周期默认指导({state.cycle_instruction_tone})：{state.cycle_instruction}")
+
+        blocks.append(self._relationship_posture(state, posture, bot_name))
 
         if continuity_text:
             blocks.append(f"连续性：{continuity_text}")
@@ -43,16 +42,25 @@ class ContextBuilder:
         if style_line:
             blocks.append(f"表达偏好：{style_line}")
 
-        text = "<companion_context>\n" + _SEP.join(blocks) + "\n</companion_context>"
-        if len(text) > max_chars:
-            text = text[: max_chars - 3] + "..."
-        return text
+        prefix = "<companion_context>\n"
+        suffix = "\n</companion_context>"
+        if max_chars < len(prefix) + len(suffix):
+            return ""
+        selected: list[str] = []
+        for block in blocks:
+            candidate = prefix + _SEP.join([*selected, block]) + suffix
+            if len(candidate) <= max_chars:
+                selected.append(block)
+        if not selected:
+            available = max(0, max_chars - len(prefix) - len(suffix))
+            selected.append(blocks[0][:available])
+        return prefix + _SEP.join(selected) + suffix
 
     @staticmethod
     def _has_cycle_override(state: CompanionState) -> bool:
         return (
             state.cycle_negative_weight >= 1.0
-            or state.cycle_repair_weight > 0.0
+            or state.cycle_repair_weight >= StateEngine.TREND_EPSILON
             or state.cycle_boundary_hits > 0
             or (state.cycle_positive_weight >= 2.0 and state.cycle_message_count > 0)
         )
@@ -63,7 +71,7 @@ class ContextBuilder:
         if details:
             rel += f"（{details}）"
         energy = self._energy_text(state.energy)
-        return f"{rel}。{bot_name}状态：{state.mood}，能量{energy}。回复基调：{posture}"
+        return f"{rel}。{bot_name}互动状态：{state.mood}，余裕{energy}。回复基调：{posture}"
 
     def _relationship_details(self, state: CompanionState) -> str:
         """只报非默认维度，避免'一般/很低'的冗余表述。"""
@@ -83,11 +91,22 @@ class ContextBuilder:
         """只在有非默认偏好时才返回内容。"""
         parts: list[str] = []
         if style.preferred_length != "中等":
-            parts.append(f"长度偏{style.preferred_length}")
+            length_text = "以1-3句为主，但完整回答必要内容" if style.preferred_length == "简短" else "允许充分展开"
+            parts.append(f"篇幅：{length_text}")
         if style.preferred_tone != "自然":
-            parts.append(f"语气偏{style.preferred_tone}")
+            tone_text = {
+                "温柔": "温和明确，不刻意甜腻",
+                "直球": "结论先行、少铺垫，仍保持礼貌",
+                "轻微吐槽": "可轻微调侃，不讽刺、不贬低",
+            }.get(style.preferred_tone, style.preferred_tone)
+            parts.append(f"语气：{tone_text}")
         if style.preferred_initiative != "正常接话":
-            parts.append(f"主动程度{style.preferred_initiative}")
+            initiative_text = (
+                "无必要信息缺口时不追加问题"
+                if style.preferred_initiative == "少追问"
+                else "回答后可补充一项紧密相关的延伸"
+            )
+            parts.append(f"主动性：{initiative_text}")
         return "，".join(parts)
 
     @staticmethod
@@ -127,11 +146,11 @@ class ContextBuilder:
     @staticmethod
     def _energy_text(value: float) -> str:
         if value <= 30:
-            return "很低，已经累了"
+            return "很低"
         if value <= 42:
-            return "偏低，有点累"
+            return "偏低"
         if value <= 55:
             return "普通"
         if value <= 68:
-            return "稳定，状态不错"
-        return "充足，很有精神"
+            return "稳定"
+        return "充足"

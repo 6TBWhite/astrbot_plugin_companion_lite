@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import dataclass
 
 from .state import StyleProfile
@@ -12,6 +13,13 @@ class InteractionEvent:
     event_class: str = "neutral"
     reason: str = ""
     confidence: float = 1.0
+    intensity: float = 1.0
+
+    def __post_init__(self) -> None:
+        confidence = self.confidence if math.isfinite(self.confidence) else 1.0
+        intensity = self.intensity if math.isfinite(self.intensity) else 1.0
+        object.__setattr__(self, "confidence", max(0.0, min(1.0, confidence)))
+        object.__setattr__(self, "intensity", max(0.25, min(2.0, intensity)))
 
 
 class EventEngine:
@@ -37,6 +45,19 @@ class EventEngine:
     LOW_ENERGY_KEYWORDS = ["我好累", "我累了", "困了", "我困了", "想睡", "累死", "撑不住", "没力气", "心累"]
     DEEP_SHARING_MIN_LENGTH = 200
     ACTIVE_CHAT_THRESHOLD_PER_MIN = 5
+
+    EVENT_INTENSITY = {
+        "boundary_push": 1.25,
+        "rest_request": 0.35,
+        "apology": 0.65,
+        "repair": 0.75,
+        "positive_closure": 0.7,
+        "affection": 0.9,
+        "gratitude": 0.75,
+        "comfort": 0.75,
+        "low_energy_share": 0.5,
+        "boredom": 0.7,
+    }
 
     NEGATION_PREFIXES = ("不", "别", "没", "无", "非", "莫", "勿", "不要", "不是", "没有", "别说")
 
@@ -119,11 +140,16 @@ class EventEngine:
         ]
         for event_type, event_class, keywords, reason in checks:
             if cls._hit(lower, keywords):
-                return InteractionEvent(event_type, event_class, reason)
+                intensity = cls.EVENT_INTENSITY.get(event_type, 1.0)
+                if event_type == "boundary_push":
+                    repetitions = max((lower.count(keyword) for keyword in keywords if keyword in lower), default=1)
+                    intensity = min(2.0, intensity + 0.2 * (repetitions - 1))
+                return InteractionEvent(event_type, event_class, reason, intensity=intensity)
         if len(text) >= cls.DEEP_SHARING_MIN_LENGTH:
             if cls._looks_like_paste(text):
                 return InteractionEvent("neutral", "neutral", "长内容疑似代码/链接粘贴，按普通互动处理", 0.8)
-            return InteractionEvent("deep_sharing", "prosocial", "用户发送较长内容，可能是深度分享", 0.8)
+            intensity = min(2.0, 0.6 + 0.45 * math.log1p(len(text) / 120.0))
+            return InteractionEvent("deep_sharing", "prosocial", "用户发送较长内容，可能是深度分享", 0.8, intensity)
         if recent_rate >= cls.ACTIVE_CHAT_THRESHOLD_PER_MIN:
             return InteractionEvent("active_chat", "neutral", "短时间内连续互动，消耗互动能量", 0.7)
         return InteractionEvent("neutral", "neutral", "普通互动")

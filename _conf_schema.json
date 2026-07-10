@@ -24,7 +24,7 @@
       },
       "enable_deep_reflection": {
         "description": "启用深度反思",
-        "hint": "每N条消息触发LLM辅助深度关系分析",
+        "hint": "每完成配置数量的用户消息+Bot回复轮次，触发一次LLM语义校正",
         "type": "bool",
         "default": true
       },
@@ -90,53 +90,37 @@
     "type": "object",
     "items": {
       "reflection_message_interval": {
-        "description": "反思触发消息间隔",
-        "hint": "每收到多少条消息触发一次LLM深度反思",
+        "description": "反思触发问答轮数",
+        "hint": "每完成多少个用户消息+Bot回复的完整来回，立即触发一次深度反思",
         "type": "int",
-        "default": 12
+        "default": 10
       },
       "reflection_time_interval_minutes": {
-        "description": "反思触发时间间隔(分钟)",
-        "hint": "距离上次反思至少间隔多少分钟才再次触发",
+        "description": "未满轮次静默收尾(分钟)",
+        "hint": "未达到触发轮数时，从最后一条用户消息起静默多久后提前反思收尾",
         "type": "int",
-        "default": 30
+        "default": 40
       }
     }
   },
   "Continuity_Settings": {
-    "description": "每日弧线与连续性",
-    "hint": "P3：每日情感弧线提炼与次日开场连续性注入。",
+    "description": "会话弧线与连续性",
+    "hint": "按互动会话记录状态轨迹、转折点和规则结果，并注入仍有效的相处连续性。",
     "type": "object",
     "items": {
       "enable_continuity_injection": {
         "description": "启用连续性注入",
-        "hint": "把昨天的弧线与相处建议注入到今天的对话上下文（也是 A/B 验证开关）",
+        "hint": "把最近会话结果、跨会话模式和高置信互动偏好注入上下文",
         "type": "bool",
         "default": true
       },
-      "continuity_lookback_days": {
-        "description": "趋势回看天数",
-        "hint": "生成连续性提示时回看最近几天的弧线趋势（1-7）",
+      "continuity_lookback_sessions": {
+        "description": "趋势回看会话数",
+        "hint": "生成连续性提示时聚合最近多少段已结束会话（3-20）",
         "type": "int",
-        "default": 3
-      },
-      "enable_arc_finalization": {
-        "description": "启用日终弧线收尾",
-        "hint": "跨天首次反思时把昨天累积的建议片段压缩成一条正式的明日指导",
-        "type": "bool",
-        "default": true
-      },
-      "arc_midday_compress_threshold": {
-        "description": "日中压缩片段阈值",
-        "hint": "一天内累积到几条建议片段就先做一次中间压缩（0=禁用日中压缩）",
-        "type": "int",
-        "default": 4
-      },
-      "arc_max_segments": {
-        "description": "弧线片段保留上限",
-        "hint": "每天最多保留几条建议片段，超出按日中压缩或截断",
-        "type": "int",
-        "default": 5
+        "min": 3,
+        "max": 20,
+        "default": 7
       }
     }
   },
@@ -149,12 +133,16 @@
         "description": "能量沉默阈值",
         "hint": "能量低于此值时进入低能量沉默模式",
         "type": "int",
+        "min": 10,
+        "max": 90,
         "default": 25
       },
       "silence_boundary_threshold": {
         "description": "边界沉默阈值",
         "hint": "边界压力高于此值时进入防御沉默模式",
         "type": "int",
+        "min": 0,
+        "max": 100,
         "default": 60
       }
     }

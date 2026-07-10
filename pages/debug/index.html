@@ -64,7 +64,7 @@
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif; background: var(--bg-app); color: var(--text-primary); line-height: 1.5; }
     .layout { display: flex; min-height: 100vh; }
-    .sidebar { width: 220px; flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-light); padding: var(--space-5); position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px; }
+    .sidebar { width: 204px; flex-shrink: 0; background: var(--bg-sidebar); border-right: 1px solid var(--border-light); padding: var(--space-5); position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px; }
     .sidebar .brand { padding: var(--space-2) var(--space-3); margin-bottom: var(--space-3); display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
     .sidebar .brand h1 { font-size: 15px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; }
     .sidebar .brand .sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
@@ -106,26 +106,30 @@
     .metric-desc { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
     .bar-bg { background: var(--bg-input); border-radius: 999px; height: 10px; margin-top: 5px; overflow: hidden; }
     .bar-fg { height: 100%; border-radius: 999px; transition: width 0.3s; }
-    .bar-fg.fam-high { background: #2b8a3e; }
-    .bar-fg.fam-mid { background: #4c6ef5; }
-    .bar-fg.fam-low { background: #e67700; }
-    .bar-fg.fam-very-low { background: #adb5bd; }
-    .bar-fg.bnd-low { background: #2b8a3e; }
-    .bar-fg.bnd-mid { background: #e67700; }
-    .bar-fg.bnd-high { background: #e8590c; }
-    .bar-fg.bnd-very-high { background: #c92a2a; }
-    .bar-fg.eng-crit { background: #c92a2a; }
-    .bar-fg.eng-low { background: #e8590c; }
-    .bar-fg.eng-mid { background: #e67700; }
-    .bar-fg.eng-stable { background: #4c6ef5; }
-    .bar-fg.eng-high { background: #2b8a3e; }
+    .bar-fg.fam-high { background: #3b5bdb; }
+    .bar-fg.fam-mid { background: #5c7cfa; }
+    .bar-fg.fam-low { background: #91a7ff; }
+    .bar-fg.fam-very-low { background: #bac8ff; }
+    .bar-fg.safe-high { background: #0ca678; }
+    .bar-fg.safe-mid { background: #20c997; }
+    .bar-fg.safe-low { background: #63e6be; }
+    .bar-fg.safe-very-low { background: #96f2d7; }
+    .bar-fg.bnd-low { background: #eebefa; }
+    .bar-fg.bnd-mid { background: #da77f2; }
+    .bar-fg.bnd-high { background: #ae3ec9; }
+    .bar-fg.bnd-very-high { background: #862e9c; }
+    .bar-fg.eng-crit { background: #f08c00; }
+    .bar-fg.eng-low { background: #fab005; }
+    .bar-fg.eng-mid { background: #fcc419; }
+    .bar-fg.eng-stable { background: #ffd43b; }
+    .bar-fg.eng-high { background: #ffe066; }
     .bar-close { position: relative; display: flex; height: 10px; margin-top: 5px; background: var(--bg-input); border-radius: 999px; overflow: hidden; }
     .bar-close-mid { position: absolute; left: 33.333%; top: 0; bottom: 0; width: 2px; background: var(--text-tertiary); z-index: 2; }
     .bar-close-neg, .bar-close-pos { position: relative; height: 100%; }
     .bar-close-neg { flex: 1; }
     .bar-close-pos { flex: 2; }
-    .bar-close-neg-fill { position: absolute; right: 0; top: 0; bottom: 0; background: #9c36b5; border-radius: 999px 0 0 999px; }
-    .bar-close-pos-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #f783ac, #ff8787); border-radius: 0 999px 999px 0; }
+    .bar-close-neg-fill { position: absolute; right: 0; top: 0; bottom: 0; background: #868e96; border-radius: 999px 0 0 999px; }
+    .bar-close-pos-fill { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #faa2c1, #e64980); border-radius: 0 999px 999px 0; }
     .bar-fg.high { background: var(--success); }
     .bar-fg.mid { background: var(--warning); }
     .bar-fg.low { background: var(--danger); }
@@ -147,6 +151,10 @@
     .arc-day .arc-line { font-size: 13px; padding: 2px 0; }
     .arc-day .arc-line .k { color: var(--text-secondary); margin-right: 6px; }
     .arc-day ul { margin: 4px 0 0 18px; font-size: 13px; }
+    .section-head { margin-bottom: var(--space-4); }
+    .section-head h2 { font-size: 20px; line-height: 1.2; letter-spacing: -0.02em; }
+    .section-head p { color: var(--text-secondary); font-size: 13px; margin-top: 5px; }
+    .card-title-meta { color: var(--text-secondary); font-size: 11px; font-weight: 400; margin-left: 6px; }
     @media (max-width: 760px) {
       .layout { flex-direction: column; }
       .sidebar { width: 100%; height: auto; position: static; }
@@ -165,11 +173,11 @@
         <button class="theme-dot" id="theme-toggle" type="button" title="切换深浅色"><span id="theme-icon"></span></button>
       </div>
       <button class="nav-item active" data-section="overview"><span class="nav-icon">O</span><span>状态总览</span></button>
-      <button class="nav-item" data-section="continuity"><span class="nav-icon">C</span><span>今日弧线与连续性</span></button>
-      <button class="nav-item" data-section="injection"><span class="nav-icon">I</span><span>回复指导与注入</span></button>
-      <button class="nav-item" data-section="style"><span class="nav-icon">S</span><span>风格画像</span></button>
+      <button class="nav-item" data-section="continuity"><span class="nav-icon">A</span><span>会话弧线</span></button>
+      <button class="nav-item" data-section="injection"><span class="nav-icon">G</span><span>指导与注入</span></button>
+      <button class="nav-item" data-section="style"><span class="nav-icon">P</span><span>互动画像</span></button>
       <button class="nav-item" data-section="messages"><span class="nav-icon">M</span><span>消息缓冲</span></button>
-      <button class="nav-item" data-section="system"><span class="nav-icon">H</span><span>系统与插件状态</span></button>
+      <button class="nav-item" data-section="system"><span class="nav-icon">R</span><span>运行状态</span></button>
       <div class="badges" id="side-badges"></div>
     </nav>
     <main class="main" id="app">
@@ -180,6 +188,15 @@
   <script>
     let bridge = null;
     let activeSection = "overview";
+    let dashboardData = {
+      state: {},
+      style: {},
+      messages: { messages: [] },
+      health: {},
+      arc: { sessions: [], interaction_profile: [] },
+    };
+    let renderRunning = false;
+    const pendingRenderKinds = new Set();
     const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8Z"/></svg>';
     const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>';
 
@@ -247,6 +264,7 @@
 
     function famClass(v) { return v > 70 ? "fam-high" : v > 45 ? "fam-mid" : v > 20 ? "fam-low" : "fam-very-low"; }
     function famDesc(v) { return v > 70 ? "很高" : v > 45 ? "较高" : v > 20 ? "一般" : "很低"; }
+    function safeClass(v) { return v > 70 ? "safe-high" : v > 45 ? "safe-mid" : v > 20 ? "safe-low" : "safe-very-low"; }
     function bndClass(v) { return v < 15 ? "bnd-low" : v < 35 ? "bnd-mid" : v < 60 ? "bnd-high" : "bnd-very-high"; }
     function bndDesc(v) { return v < 15 ? "放松" : v < 35 ? "轻微" : v < 60 ? "明显" : "很高"; }
     function engClass(v) { return v <= 30 ? "eng-crit" : v <= 42 ? "eng-low" : v <= 55 ? "eng-mid" : v <= 68 ? "eng-stable" : "eng-high"; }
@@ -293,10 +311,12 @@
       if (!state) return "";
       const f = Number(state.familiarity) || 0;
       const c = Number(state.closeness) || 0;
+      const s = Number(state.safety) || 0;
       const b = Number(state.boundary_pressure) || 0;
       const e = Number(state.energy) || 0;
       return renderMetric("熟悉度", f, 0, 100, famClass(f), famDesc(f))
         + renderClosenessMetric("亲近度", c)
+        + renderMetric("安全感", s, 0, 100, safeClass(s), s < 30 ? "较低，关系升温受抑制" : s < 50 ? "谨慎恢复中" : "稳定")
         + renderMetric("边界压力", b, 0, 100, bndClass(b), bndDesc(b))
         + renderMetric("精力", e, 0, 90, engClass(e), engDesc(e));
     }
@@ -310,22 +330,27 @@
       notify._timer = setTimeout(() => { el.className = "toast"; }, 2600);
     }
 
-    function renderState(state) {
+    function renderState(state, reflectionInterval) {
       if (!state) return '<div class="error">无状态数据</div>';
       const bondBadge = state.bonded
         ? '<span class="badge on">陪伴模式</span>'
         : '<span class="badge off">普通模式</span>';
-      const reflectProgress = `${state.cycle_message_count || 0} / 12`;
+      const reflectProgress = `${state.completed_rounds || 0} / ${reflectionInterval || 10}`;
       const relRow = '<div class="stat-row"><span class="label">当前关系</span><span class="value">'
         + esc(state.relationship_label || "未知") + ' ' + bondBadge + '</span></div>';
       return relRow + rows([
         ["相处姿态", state.boundary_stance || "-"],
         ["当前心情", state.mood || "-"],
+        ["心情强度", state.mood_intensity != null ? Number(state.mood_intensity).toFixed(2) : "-"],
         ["累计消息数", state.messages_seen || 0],
         ["今日消息数", state.today_messages || 0],
         ["今日熟悉度变化", state.today_familiarity_gain != null ? Number(state.today_familiarity_gain).toFixed(2) : "-"],
         ["今日亲近度变化", state.today_closeness_gain != null ? Number(state.today_closeness_gain).toFixed(2) : "-"],
         ["最近事件", `${state.last_event || "-"}（${state.last_event_class || "-"}）`],
+        ["事件置信度 / 强度", `${Number(state.last_event_confidence || 0).toFixed(2)} / ${Number(state.last_event_intensity || 0).toFixed(2)}`],
+        ["最近回复工作量", Number(state.last_reply_workload || 0).toFixed(3)],
+        ["回复字数 / 句数 / 段落", `${state.last_reply_chars || 0} / ${state.last_reply_sentences || 0} / ${state.last_reply_paragraphs || 0}`],
+        ["回复问句 / 代码字符", `${state.last_reply_questions || 0} / ${state.last_reply_code_chars || 0}`],
         ["本周期消息数 / 触发阈值", reflectProgress],
         ["本周期基调", state.cycle_dominant_class || "-"],
         ["下周期语气（LLM建议）", state.next_cycle_tone || "-"],
@@ -336,8 +361,13 @@
 
     function renderGuidance(state) {
       if (!state) return '<div class="error">无指导数据</div>';
+      const axes = state.posture_axes || {};
       return rows([
         ["总体回复基调", state.posture_explanation || state.last_posture || "-"],
+        ["边界轴", axes.boundary || "-"],
+        ["精力轴", axes.energy || "-"],
+        ["亲近轴", axes.closeness || "-"],
+        ["安全轴", axes.safety || "-"],
         ["事件原因", state.last_event_reason || "-"],
         ["门控原因", state.last_gate_reason || "-"],
         ["当前周期策略（规则）", state.cycle_instruction || "-"],
@@ -362,50 +392,56 @@
       return html;
     }
 
-    function renderArcDay(arc, title) {
-      if (!arc) return '<div class="empty">' + esc(title) + '：暂无弧线记录</div>';
-      const highlights = (arc.important_interactions || []).map(h => '<li>' + esc(h) + '</li>').join("");
-      const updated = arc.updated_at ? new Date(Number(arc.updated_at) * 1000).toLocaleTimeString() : "-";
-      const finalizedBadge = arc.finalized
-        ? '<span class="badge on">已收尾</span>'
-        : '<span class="badge warn">进行中</span>';
-      const segCount = (arc.guidance_segments || []).length;
-      const segments = (arc.guidance_segments || []).map(s => '<li>' + esc(s) + '</li>').join("");
-      const cycleInfo = arc.cycle_count ? ' · 第' + esc(arc.cycle_count) + '次反思' : "";
-      let html = '<div class="arc-day">';
-      html += '<div class="arc-date"><span>' + esc(arc.date) + ' ' + esc(title || "") + ' ' + finalizedBadge + '</span><span class="label">更新 ' + esc(updated) + ' · ' + esc(arc.source || "local") + cycleInfo + '</span></div>';
-      html += '<div class="arc-line"><span class="k">整体走势</span>' + esc(arc.overall_mood || "-") + '</div>';
-      html += '<div class="arc-line"><span class="k">关系趋势</span>' + esc(arc.relationship_trend || "-") + '</div>';
-      html += '<div class="arc-line"><span class="k">明日建议</span>' + esc(arc.tomorrow_guidance || "-") + '</div>';
-      if (segCount) {
-        html += '<div class="arc-line"><span class="k">累积片段(' + segCount + ')</span><ul>' + segments + '</ul></div>';
-      }
-      if (highlights) {
-        html += '<div class="arc-line"><span class="k">重要互动</span><ul>' + highlights + '</ul></div>';
-      }
-      html += '</div>';
-      return html;
-    }
-
     function renderContinuity(arcData) {
       if (!arcData) return '<div class="error">无弧线数据</div>';
       const enabledBadge = arcData.continuity_enabled
         ? '<span class="badge on">注入开启</span>'
         : '<span class="badge off">注入关闭</span>';
-      const finalizeBadge = arcData.arc_finalization_enabled
-        ? '<span class="badge on">日终收尾开启</span>'
-        : '<span class="badge off">日终收尾关闭</span>';
-      let html = '<div class="card"><h2>连续性注入预览 ' + enabledBadge + ' ' + finalizeBadge + ' <span class="label">回看 ' + esc(arcData.lookback_days) + ' 天</span></h2>';
+      const sessions = arcData.sessions || [];
+      const openSession = arcData.open_session || sessions.find(session => session.status === "open");
+      let html = '<div class="section-head"><h2>会话弧线</h2><p>按互动会话记录状态变化、关键转折和结束结果，不再按自然日切分。</p></div>';
+      html += '<div class="card"><h2>当前会话</h2>';
+      if (openSession) {
+        const points = openSession.turning_points || [];
+        const started = openSession.started_at ? new Date(Number(openSession.started_at) * 1000).toLocaleString() : "-";
+        html += rows([
+          ["开始时间", started],
+          ["用户消息", openSession.message_count || 0],
+          ["当前阶段", openSession.outcome === "ongoing" ? "进行中" : openSession.outcome],
+          ["边界峰值", Number(openSession.peak_boundary_pressure || 0).toFixed(1)],
+          ["负向 / 正向趋势峰值", `${Number(openSession.peak_negative_trend || 0).toFixed(1)} / ${Number(openSession.peak_positive_trend || 0).toFixed(1)}`],
+          ["最低精力", Number(openSession.min_energy || 0).toFixed(1)],
+          ["已记录转折", points.length],
+        ]);
+      } else {
+        html += '<div class="empty">当前没有进行中的会话。下一条有效用户消息会自动建立新会话。</div>';
+      }
+      html += '</div>';
+      html += '<div class="card"><h2>连续性提示 ' + enabledBadge + '<span class="card-title-meta">最近 ' + esc(arcData.lookback_sessions || 7) + ' 段会话</span></h2>';
       if (arcData.continuity_text) {
         html += '<div class="context-box">' + esc(arcData.continuity_text) + '</div>';
       } else {
-        html += '<div class="empty">当前无可注入的连续性内容（昨日无弧线 / 未收尾 / 已过期 / 注入关闭）。</div>';
+        html += '<div class="empty">暂无已结束会话或高置信互动偏好，因此当前不注入历史连续性。</div>';
       }
       html += "</div>";
-      html += '<div class="card"><h2>今日弧线</h2>' + renderArcDay(arcData.today, "（今天）") + '</div>';
-      const recent = (arcData.recent || []).filter(a => !arcData.today || a.date !== arcData.today.date);
-      html += '<div class="card"><h2>近 7 天弧线</h2>' + (recent.length ? recent.map(a => renderArcDay(a, "")).join("") : '<div class="empty">暂无历史弧线</div>');
-      html += '<div class="btn-row"><button class="btn" data-action="status">刷新弧线</button><button class="btn danger" data-action="clear_arcs">重置弧线</button></div></div>';
+      const closedSessions = sessions.filter(session => session.status === "closed");
+      html += '<div class="card"><h2>历史会话<span class="card-title-meta">最近 ' + closedSessions.length + ' 段已结束会话</span></h2>';
+      if (!closedSessions.length) {
+        html += '<div class="empty">暂无已结束会话。会话静默 60 分钟后会自动收尾并计算结果。</div>';
+      } else {
+        html += closedSessions.map(session => {
+          const points = session.turning_points || [];
+          const started = session.started_at ? new Date(Number(session.started_at) * 1000).toLocaleString() : "-";
+          const pointList = points.length ? '<ul>' + points.map(point => '<li>' + esc(point.kind) + ' · ' + esc(point.reason || point.event_type || "-") + '</li>').join("") + '</ul>' : '<span class="label">无显著转折</span>';
+          return '<div class="arc-day"><div class="arc-date"><span>' + esc(started) + ' <span class="badge on">已结束</span></span><span class="label">' + esc(session.message_count || 0) + ' 条用户消息</span></div>'
+            + '<div class="arc-line"><span class="k">规则结果</span>' + esc(session.outcome || "ongoing") + '</div>'
+            + (session.summary ? '<div class="arc-line"><span class="k">会话摘要</span>' + esc(session.summary) + '</div>' : '')
+            + '<div class="arc-line"><span class="k">峰值</span>边界 ' + esc(Number(session.peak_boundary_pressure || 0).toFixed(1)) + ' · 负向趋势 ' + esc(Number(session.peak_negative_trend || 0).toFixed(1)) + ' · 最低精力 ' + esc(Number(session.min_energy || 0).toFixed(1)) + '</div>'
+            + '<div class="arc-line"><span class="k">转折点</span>' + pointList + '</div></div>';
+        }).join("");
+      }
+      html += '</div>';
+      html += '<div class="card"><div class="btn-row"><button class="btn" data-action="status">刷新</button><button class="btn danger" data-action="clear_arcs">重置弧线与互动画像</button></div></div>';
       return html;
     }
 
@@ -417,6 +453,18 @@
         ["主动程度", style.preferred_initiative],
         ["上次更新", style.updated_at ? new Date(Number(style.updated_at) * 1000).toLocaleString() : "-"],
       ]);
+    }
+
+    function renderInteractionProfile(style, evidence) {
+      const profile = evidence || [];
+      let html = '<div class="section-head"><h2>互动画像</h2><p>只记录如何相处的偏好证据；用户事实和长期记忆由 LivingMemory 管理。</p></div>';
+      html += '<div class="card"><h2>当前回复偏好</h2>' + renderStyle(style) + '</div>';
+      html += '<div class="card"><h2>偏好证据<span class="card-title-meta">带来源、置信度和观测次数</span></h2>';
+      html += profile.length
+        ? rows(profile.map(item => [item.profile_key, `${item.profile_value} · ${item.source} · 置信度 ${Number(item.confidence || 0).toFixed(2)} · 证据 ${item.positive_evidence || 0}`]))
+        : '<div class="empty">暂无持久化互动偏好。明确提出“短点”“温柔点”“别追问”等要求后会记录在这里。</div>';
+      html += '</div>';
+      return html;
     }
 
     function renderMessages(messages) {
@@ -453,15 +501,37 @@
       return `<div class="section ${id === activeSection ? "active" : ""}" data-section-body="${id}">${inner}</div>`;
     }
 
-    async function render() {
+    async function refreshData(kinds) {
+      const requested = kinds || ["state", "style", "messages", "health", "arc"];
+      const paths = {
+        state: ["page/state", {}],
+        style: ["page/style", {}],
+        messages: ["page/messages", { messages: [] }],
+        health: ["page/health", {}],
+        arc: ["page/arc", { sessions: [], interaction_profile: [] }],
+      };
+      const results = await Promise.all(requested.map(async kind => {
+        const [path, fallback] = paths[kind];
+        return [kind, await safeGet(path, fallback)];
+      }));
+      for (const [kind, value] of results) dashboardData[kind] = value;
+    }
+
+    async function render(kinds) {
+      const requested = kinds || ["state", "style", "messages", "health", "arc"];
+      if (renderRunning) {
+        for (const kind of requested) pendingRenderKinds.add(kind);
+        return;
+      }
+      renderRunning = true;
+      const scrollSaves = _saveScrollPositions();
       try {
-        const [stateData, styleData, messagesData, healthData, arcData] = await Promise.all([
-          safeGet("page/state", {}),
-          safeGet("page/style", {}),
-          safeGet("page/messages", { messages: [] }),
-          safeGet("page/health", {}),
-          safeGet("page/arc", { recent: [] }),
-        ]);
+        await refreshData(requested);
+        const stateData = dashboardData.state;
+        const styleData = dashboardData.style;
+        const messagesData = dashboardData.messages;
+        const healthData = dashboardData.health;
+        const arcData = dashboardData.arc;
 
         const health = healthData || {};
         if (stateData._error) throw new Error("page/state: " + stateData._error);
@@ -490,16 +560,17 @@
         const silenceStatus = state.silence_active
           ? '<span class="badge off" title="当前关系状态触发收敛/少追问提示。">收敛策略</span>'
           : '<span class="badge on" title="按普通关系上下文注入。">普通策略</span>';
-        const arcBadge = (arcData && arcData.today)
-          ? '<span class="badge on" title="今天已有弧线记录。">今日有弧线</span>'
-          : '<span class="badge off" title="今天还没有反思生成弧线。">今日无弧线</span>';
+        const openSession = arcData && arcData.open_session;
+        const arcBadge = openSession
+          ? '<span class="badge warn" title="当前互动正在写入结构化会话弧线。">会话进行中</span>'
+          : '<span class="badge on" title="当前没有开放会话。">会话空闲</span>';
         document.getElementById("side-badges").innerHTML = `${lmBadge}${silenceStatus}${arcBadge}`;
 
         const overview = `
           ${dataErrors.length ? `<div class="card"><h2>部分数据加载失败</h2><div class="error">${esc(dataErrors.join("；"))}</div></div>` : ""}
           <div class="card">
             <h2>用户 ${esc(userId)}</h2>
-            <div id="state-list">${renderState(state)}</div>
+            <div id="state-list">${renderState({...state, completed_rounds: health.completed_rounds}, health.reflection_message_interval)}</div>
             <div class="btn-row">
               <button class="btn" data-action="reflect">触发反思</button>
               <button class="btn" data-action="status">刷新</button>
@@ -508,14 +579,15 @@
           </div>
           <div class="card">
             <h2>核心指标</h2>
-            <div class="hint">这里只显示会影响回复的四个核心指标。精力会自然起伏——精神好时话多但消耗快，累了会话少想休息，这是正常的。</div>
+            <div class="hint">这里显示关系与回复动力学的五个核心指标。精力会自然起伏，安全感和边界压力会共同影响关系升温与回复姿态。</div>
             <div id="bars">${renderBars(state)}</div>
           </div>
         `;
 
         const injection = `
+          <div class="section-head"><h2>指导与注入</h2><p>查看当前行为约束，以及最近一次实际发送给模型的 CompanionLite 上下文。</p></div>
           <div class="card">
-            <h2>当前指导</h2>
+            <h2>当前回复指导</h2>
             ${renderGuidance(state)}
           </div>
           <div class="card">
@@ -525,18 +597,12 @@
           </div>
         `;
 
-        const styleSection = `
-          <div class="card">
-            <h2>风格画像</h2>
-            <div class="hint">这三项会根据你的聊天习惯慢慢调整，每次反思后可能更新。</div>
-            ${renderStyle(style)}
-          </div>
-        `;
+        const styleSection = renderInteractionProfile(style, arcData.interaction_profile || []);
 
         const messagesSection = `
           <div class="card">
-            <h2>消息缓冲（最近 ${messages.length} 条，达 12 条触发反思）</h2>
-            <div style="max-height:520px;overflow-y:auto">${renderMessages(messages)}</div>
+            <h2>消息缓冲（最近 ${messages.length} 条，完成 ${health.reflection_message_interval || 10} 轮问答触发反思）</h2>
+            <div class="msg-scroll" style="max-height:520px;overflow-y:auto">${renderMessages(messages)}</div>
             <div class="btn-row">
               <button class="btn danger" data-action="clear_msgs">清空消息缓冲</button>
             </div>
@@ -544,8 +610,9 @@
         `;
 
         const systemSection = `
+          <div class="section-head"><h2>运行状态</h2><p>检查捕获、反思、注入、任务和外部协同是否正常工作。</p></div>
           <div class="card">
-            <h2>系统信息</h2>
+            <h2>插件健康</h2>
             ${renderHealth(health)}
           </div>
         `;
@@ -557,8 +624,55 @@
           + sectionHtml("style", styleSection)
           + sectionHtml("messages", messagesSection)
           + sectionHtml("system", systemSection);
+        _restoreScrollPositions(scrollSaves);
       } catch (e) {
         document.getElementById("app").innerHTML = `<div class="error">加载失败: ${esc(e.message)}</div>`;
+      } finally {
+        renderRunning = false;
+        if (pendingRenderKinds.size) {
+          const pending = Array.from(pendingRenderKinds);
+          pendingRenderKinds.clear();
+          setTimeout(() => render(pending), 0);
+        }
+      }
+    }
+
+    function _saveScrollPositions() {
+      const saves = [];
+      const app = document.getElementById("app");
+      if (!app) return saves;
+      const els = [app, ...app.querySelectorAll("[data-scroll-key], .msg-scroll, .context-box")];
+      for (const el of els) {
+        if (el.scrollTop > 0 || el.scrollHeight > el.clientHeight) {
+          saves.push({ key: el.dataset.scrollKey || el.className || el.tagName, top: el.scrollTop, left: el.scrollLeft });
+        }
+      }
+      const main = document.querySelector(".main");
+      if (main && (main.scrollTop > 0 || main.scrollHeight > main.clientHeight)) {
+        saves.push({ key: "__main__", top: main.scrollTop, left: main.scrollLeft });
+      }
+      return saves;
+    }
+
+    function _restoreScrollPositions(saves) {
+      if (!saves || !saves.length) return;
+      const main = document.querySelector(".main");
+      const app = document.getElementById("app");
+      const els = app ? [app, ...app.querySelectorAll(".msg-scroll, .context-box")] : [];
+      for (const s of saves) {
+        if (s.key === "__main__" && main) {
+          main.scrollTop = s.top;
+          main.scrollLeft = s.left;
+          continue;
+        }
+        for (const el of els) {
+          const key = el.dataset.scrollKey || el.className || el.tagName;
+          if (key === s.key) {
+            el.scrollTop = s.top;
+            el.scrollLeft = s.left;
+            break;
+          }
+        }
       }
     }
 
@@ -593,14 +707,14 @@
           notify("消息缓冲已清空");
         } else if (action === "clear_arcs") {
           await apiGet("page/clear_arcs");
-          notify("每日弧线已重置");
+          notify("会话弧线与互动画像已重置");
         } else if (action === "reflect") {
           await apiGet("page/trigger_reflection");
           notify("已请求触发反思");
         } else if (action === "status") {
           notify("正在刷新");
         }
-        setTimeout(render, 250);
+        setTimeout(() => render(), 250);
       } catch (e) {
         notify("操作失败: " + e.message, true);
       }
@@ -613,8 +727,11 @@
           throw new Error("AstrBotPluginPage bridge 未加载");
         }
         await bridge.ready();
-        render();
-        setInterval(render, 5000);
+        await render();
+        setInterval(() => render(["state"]), 5000);
+        setInterval(() => render(["messages", "arc"]), 15000);
+        setInterval(() => render(["health"]), 30000);
+        setInterval(() => render(["style"]), 60000);
       } catch (e) {
         document.getElementById("app").innerHTML = `<div class="error">Bridge 初始化失败: ${esc(e.message)}</div>`;
       }
