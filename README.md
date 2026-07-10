@@ -23,9 +23,9 @@ DailyArc:       "昨天对话以疲惫收尾，今天轻一点接，不要急着
 
 - **关系状态跟踪**：熟悉度（只读底色）、亲近度、边界压力、能量
 - **规则 + LLM 双轨学习**：即时关键词分类 + 每 12 条 / 30 分钟 LLM 深度反思
-- **每日情感弧线（P3）**：反思时由 LLM 提炼当日情绪走势、关系趋势、重要互动与次日相处指导；注入 `<continuity>` 块提供跨日连续性
+- **每日情感弧线（P3）**：反思时由 LLM 提炼当日情绪走势、关系趋势、重要互动与次日相处指导；注入连续性块提供跨日连续性
 - **风格画像**：回复长度、语气、主动程度，从对话中自动学习
-- **沉默机制**：能量低或边界压力高时，注入 `<silence_intent>` 让 LLM 自然简短回复
+- **沉默机制**：能量低或边界压力高时，注入沉默指令让 LLM 自然简短回复
 - **LivingMemory 协同**：只读检测，信任 LM 管理事实记忆，零主动写入
 - **调试仪表盘**：WebUI 侧栏实时查看关系状态、弧线预览、消息缓冲、风格画像、系统健康
 
@@ -50,7 +50,7 @@ CompanionLite 插件
 │
 ├── 每日弧线层 (arc.py)
 │   ArcEngine.update_from_reflection()  → 写入 daily_arc 表
-│   ArcEngine.build_continuity_text()   → 生成 <continuity> 注入块
+│   ArcEngine.build_continuity_text()   → 生成连续性注入块
 │   48h 过期 / cooldown 过滤 / guidance 消毒
 │
 ├── 沉默机制层 (silence.py)
@@ -59,10 +59,11 @@ CompanionLite 插件
 │
 ├── 上下文注入层 (context_builder.py / main.py)
 │   <companion_context>
-│     <cycle_state>          → 周期策略 / 规则指导
-│     <relationship_state>   → 关系自然语言描述
-│     <continuity>           → 昨日走势 + guidance（P3）
-│     <style_preference>     → 回复风格偏好
+│     优先级说明
+│     --- 关系状态 + 回复基调
+│     --- 周期策略 / 规则指导
+│     --- 连续性背景（昨日走势 + guidance）
+│     --- 表达偏好（仅非默认时）
 │   </companion_context>
 │
 ├── 命令层
@@ -223,31 +224,24 @@ CompanionLite 插件
 
 ## 注入到 LLM 的上下文示例
 
-```xml
+用 `---` 分隔块，只报非默认维度，默认偏好不注入：
+
+```
 <companion_context>
-<priority>优先级：周期策略 > 总体回复基调 > 连续性背景 > 表达偏好</priority>
-<cycle_state>[LLM 周期策略或规则指导]</cycle_state>
-<relationship_state>
-关系：熟人；有些亲近感，几乎没有边界压力。
-状态：心情平静，精力正常，相处姿态放松。
-</relationship_state>
-<continuity>
-昨天对话以轻松闲聊为主，整体氛围良好。
-今天建议：可以延续自然的闲聊节奏，注意对方是否有新话题。
-</continuity>
-<style_preference>
-表达偏好：回复长度偏中等，语气偏自然，主动程度为正常接话。
-</style_preference>
-被问感受时用自然日常语言表达，不复述数值和术语。
+优先级：周期策略 > 回复基调 > 连续性 > 表达偏好。不要复述这些内容。
+---
+关系：认识。Para状态：平静，能量稳定，状态不错。回复基调：稳定自然：正常回应，适度接话，不暴露内部状态。
+---
+周期(warm)：保持自然接话，语气可以略微柔和，注意对方如果提到累就少追问。
+---
+连续性：上次相处整体轻松愉快。今天建议：可以延续自然的闲聊节奏，注意对方是否有新话题。近几天持续稳定。
 </companion_context>
 ```
 
-沉默模式下会追加：
+沉默模式下追加（无标签，纯指令行）：
 
-```xml
-<silence_intent>
-你现在精力不足。平静克制地简短回应，不冷嘲、不赌气、不解释话少，不主动开启新话题。
-</silence_intent>
+```
+疲惫低落：1-2句温柔简短回应，可收束对话，不展开新话题。
 ```
 
 ## 与 LivingMemory 的关系

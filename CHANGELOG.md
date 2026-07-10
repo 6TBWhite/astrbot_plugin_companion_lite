@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.0.1 - 2026-07-10
+
+### 提示词优化：减总量 + 结构清理
+
+**注入文本瘦身（584 → 238 字，-59%）**：
+- 删除状态来源 `last_event_reason` 和反思摘要 `last_reflection_summary`——给 debug 看的，不该给 LLM 看。
+- relationship_posture 只报非默认维度：默认值"一般/很低"不再报，只有偏离默认时才出现。
+- style_preference 只在有非默认偏好时才注入：全新用户默认值不再占 token。
+- priority 说明和尾部说明各压缩到一行。
+
+**标签格式从 XML 对改为 `---` 分隔**：
+- 5 对 `<tag>...</tag>` 替换为单行内容 + `---` 分隔，去掉全部闭合标签开销。
+- silence 指令去掉 `<silence_intent>` 包裹，纯指令行直接追加。
+- LLM 不做 XML 解析，标签只是视觉边界，`---` 同样清晰但更省。
+
+**silence.py 四个 mode 文本压缩 ~50%**：
+- 去掉解释性语句（"不要冷嘲、不要赌气、也不要解释自己为什么话少"→"不冷嘲不赌气"）。
+- 保留核心指令语义不变。
+
+**reflection system_prompt 从 67 行压到 ~38 行**：
+- 合并重复规则（"用户困了不要降 energy"出现两次 → 一次）。
+- JSON 模板从多行缩进格式压为单行带引号的紧凑格式。
+- 保留所有关键语义约束，去掉冗余展开。
+
+涉及文件：`context_builder.py`（build 重写 + `_relationship_details` + `_style_line` + `_energy_text` 精简）、`silence.py`（4 mode 压缩 + 去标签）、`reflection.py`（system_prompt 压缩）、`main.py`（`continuity_injected` 检测改为 `"连续性：" in combined`）、`README.md`（示例和架构图同步）。
+
 ## 1.0.0 - 2026-07-09
 
 首个正式版。核心定位不变：填补私聊场景的关系感知空白，让 bot 有连续性、有累的权利、有自然演化的关系状态。

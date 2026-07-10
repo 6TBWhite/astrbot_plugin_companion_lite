@@ -453,7 +453,7 @@ class CompanionLitePlugin(Star):
             "cycle_started_at": state.cycle_started_at,
             "cycle_message_count": state.cycle_message_count,
             "silence_injected": bool(silence_block),
-            "continuity_injected": "<continuity>" in combined,
+            "continuity_injected": "连续性：" in combined,
         }
 
         logger.debug(

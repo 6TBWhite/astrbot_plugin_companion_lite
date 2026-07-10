@@ -162,7 +162,7 @@ class TestEnergyTransmission:
     def test_energy_text_five_tiers(self):
         assert "已经累了" in ContextBuilder._energy_text(25)
         assert "有点累" in ContextBuilder._energy_text(38)
-        assert "正常聊" in ContextBuilder._energy_text(50)
+        assert "普通" in ContextBuilder._energy_text(50)
         assert "状态不错" in ContextBuilder._energy_text(62)
         assert "很有精神" in ContextBuilder._energy_text(69)
 
