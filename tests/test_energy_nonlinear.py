@@ -143,7 +143,7 @@ class TestActiveChatDrain:
         assert energy_delta == 0
 
     def test_40_messages_expected_drain(self):
-        """40条密集消息期望掉约12-24点（uniform 0.30-0.60 × 40）。"""
+        """40条密集消息期望掉约16-28点（uniform 0.40-0.70 × 40）。"""
         engine = StateEngine()
         state = _make_state(energy=75.0)
         start_energy = state.energy
@@ -152,8 +152,8 @@ class TestActiveChatDrain:
             event = InteractionEvent("neutral", "neutral", "test")
             engine.apply_event(state, event)
         total_drain = start_energy - state.energy
-        # 40 × uniform(0.30, 0.60) 理论范围 12-24，期望 18
-        assert total_drain >= 10.0, f"总消耗{total_drain}低于下界预期"
+        # 40 × uniform(0.40, 0.70) 理论范围 16-28，期望 22
+        assert total_drain >= 14.0, f"总消耗{total_drain}低于下界预期"
 
 
 class TestEnergyTransmission:

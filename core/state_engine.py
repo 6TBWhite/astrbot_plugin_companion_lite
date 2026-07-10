@@ -24,13 +24,13 @@ class StateEngine:
     DAILY_CLOSENESS_CAP = 18.0
 
     # 高频聊天微消耗：距上一条消息 <2分钟视为密集对话，每条额外扣一点精力。
-    # 随机 uniform(0.15, 0.40)，期望 ≈0.275，40条密集消息期望掉约11点。
+    # 随机 uniform(0.40, 0.70)，期望 ≈0.55，40条密集消息期望掉约22点。
     # 开摆区(<=30)不额外扣——累了就不追着扣了。
     ACTIVE_CHAT_WINDOW_SECONDS = 120.0
-    ACTIVE_CHAT_ENERGY_MIN = 0.30
-    ACTIVE_CHAT_ENERGY_MAX = 0.60
+    ACTIVE_CHAT_ENERGY_MIN = 0.40
+    ACTIVE_CHAT_ENERGY_MAX = 0.70
     ACTIVE_CHAT_ENERGY_FLOOR = 30.0
-    ENERGY_RECOVERY_COOLDOWN_SECONDS = 900.0  # 15分钟没人缠着才开始回血
+    ENERGY_RECOVERY_COOLDOWN_SECONDS = 600.0  # 10分钟没人缠着才开始回血
 
     EVENT_DELTAS: dict[str, dict[str, float | str]] = {
         "gratitude": {"familiarity": 0.2, "safety": 2.0, "closeness": 1.2, "energy": 1.0, "mood": MoodType.HAPPY},
@@ -66,7 +66,7 @@ class StateEngine:
         if energy_delta > 0 and state.boundary_pressure > 60:
             energy_delta *= 0.5
         # 活跃聊天期间暂停自然回血——你在聊天不在休息，不该边聊边回血。
-        # 用 15 分钟冷却期：哪怕中间停了几分钟，只要还没静下来够久就不回血。
+        # 用 10 分钟冷却期：哪怕中间停了几分钟，只要还没静下来够久就不回血。
         chat_gap = now - (state.last_state_updated_at or now)
         if energy_delta > 0 and chat_gap < self.ENERGY_RECOVERY_COOLDOWN_SECONDS:
             energy_delta = 0.0
@@ -452,7 +452,7 @@ class StateEngine:
     def _apply_active_chat_drain(self, state: CompanionState, deltas: dict[str, float], now: float) -> None:
         """高频聊天微消耗：距上一条消息 <2分钟时，每条额外随机扣一点精力。
 
-        uniform(0.15, 0.40)，期望 ≈0.275/条；40条密集消息期望掉约11点。
+        uniform(0.40, 0.70)，期望 ≈0.55/条；40条密集消息期望掉约22点。
         开摆区(energy <= 30)不额外扣——累了就不追着扣了。
         与事件本身的 energy delta 叠加（active_chat 事件本身还有 -1 × 分段系数）。
         """
