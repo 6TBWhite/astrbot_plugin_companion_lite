@@ -269,3 +269,5 @@ astrbot_plugin_companion_lite/
 ## License
 
 MIT
+
+欢迎提交 [Issue](https://github.com/6TBWhite/astrbot_plugin_companion_lite/issues) 和 [PR](https://github.com/6TBWhite/astrbot_plugin_companion_lite/pulls)。
