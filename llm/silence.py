@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .state import CompanionState
+from ..core.state import CompanionState
 
 
 class SilenceMechanism:

@@ -8,8 +8,7 @@ import tempfile
 import pytest
 
 from astrbot_plugin_companion_lite.arc import ArcEngine
-from astrbot_plugin_companion_lite.state import CompanionState
-from astrbot_plugin_companion_lite.storage import Storage
+from astrbot_plugin_companion_lite.core import CompanionState, Storage
 
 
 @pytest.fixture

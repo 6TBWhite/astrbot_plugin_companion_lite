@@ -5,8 +5,8 @@ import logging
 import time
 from typing import Any
 
-from .state import CompanionState, StyleProfile
-from .state_engine import StateEngine
+from ..core.state import CompanionState, StyleProfile
+from ..core.state_engine import StateEngine
 
 logger = logging.getLogger(__name__)
 

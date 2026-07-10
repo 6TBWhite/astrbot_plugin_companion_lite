@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .state import CompanionState, StyleProfile
-from .state_engine import StateEngine
+from ..core.state import CompanionState, StyleProfile
+from ..core.state_engine import StateEngine
 
 _SEP = "\n---\n"
 

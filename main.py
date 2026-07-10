@@ -36,16 +36,10 @@ except ImportError:
     get_astrbot_data_path = _fallback_data_path
 
 from .arc import ArcEngine
-from .binding import BindingManager
+from .integration import BindingManager, LivingMemoryIntegration
 from .config import CLConfig, load_config
-from .context_builder import ContextBuilder
-from .events import EventEngine
-from .livingmemory_integration import LivingMemoryIntegration
-from .reflection import DeepReflection
-from .silence import SilenceMechanism
-from .state import CompanionState, StyleProfile
-from .state_engine import StateEngine
-from .storage import Storage
+from .llm import ContextBuilder, DeepReflection, SilenceMechanism
+from .core import CompanionState, StyleProfile, StateEngine, EventEngine, Storage
 
 __version__ = "1.0.1"
 

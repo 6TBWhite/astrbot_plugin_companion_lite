@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import time
 
-from astrbot_plugin_companion_lite.state import CompanionState
-from astrbot_plugin_companion_lite.state_engine import StateEngine
-from astrbot_plugin_companion_lite.events import InteractionEvent
-from astrbot_plugin_companion_lite.context_builder import ContextBuilder
+from astrbot_plugin_companion_lite.core import CompanionState, StateEngine, InteractionEvent
+from astrbot_plugin_companion_lite.llm import ContextBuilder
 
 
 def _make_state(energy: float = 60.0, **kwargs) -> CompanionState:

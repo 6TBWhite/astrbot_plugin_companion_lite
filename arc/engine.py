@@ -4,8 +4,8 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from .state import CompanionState
-from .storage import Storage
+from ..core.state import CompanionState
+from ..core.storage import Storage
 
 logger = logging.getLogger(__name__)
 

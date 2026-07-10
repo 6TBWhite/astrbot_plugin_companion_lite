@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrbot_plugin_companion_lite.state import CompanionState
+from astrbot_plugin_companion_lite.core import CompanionState
 
 
 class TestBondField:
